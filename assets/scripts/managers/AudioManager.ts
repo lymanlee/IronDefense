@@ -3,9 +3,9 @@
  * 使用 Web Audio API 程序生成音效
  *
  * iOS 兼容要点：
- * - AudioContext 在用户手势触发时才创建并 resume
- * - resume() 是异步的，播放前必须 await
- * - BGM 的 setTimeout 递归也需检查 suspended 状态
+ * - AudioContext 必须在用户手势的同步调用栈内 new + resume()
+ * - resume() 不需要 await，只需在同步栈内触发即可激活
+ * - 音效播放前检查 state，如果 running 则直接播
  */
 
 export class AudioManager {
@@ -13,15 +13,13 @@ export class AudioManager {
   private _muted: boolean = false;
   private _bgmTimer: number | null = null;
   private _bgmIndex: number = 0;
-  /** 标记是否曾成功 resume 过（首次需用户手势） */
-  private _resumed: boolean = false;
 
   constructor() {
-    // 不在此处创建 AudioContext，延迟到首次用户交互时创建（iOS 兼容）
+    // 不在此处创建 AudioContext（iOS 要求在用户手势中创建）
   }
 
   /**
-   * 获取或创建 AudioContext（懒加载）
+   * 获取或创建 AudioContext（懒加载，仅内部使用）
    */
   private _getContext(): AudioContext | null {
     if (!this._ctx) {
@@ -37,39 +35,39 @@ export class AudioManager {
   }
 
   /**
-   * 在用户手势的调用栈内调用此方法，激活 AudioContext（iOS 关键）
-   * 必须在按钮点击、触摸等用户交互事件中调用
+   * 在用户手势的同步调用栈内调用此方法，激活 AudioContext（iOS 关键）
+   *
+   * 注意：这里不使用 await，而是同步触发 resume()。
+   * iOS Safari 只要求 resume() 的调用发起在用户手势栈内即可，
+   * 不需要等它 resolve。一旦 resume 启动，后续播放就能正常工作。
    */
-  async resumeContext(): Promise<void> {
+  resumeContext(): void {
     const ctx = this._getContext();
     if (!ctx) return;
     if (ctx.state === 'suspended') {
-      try {
-        await ctx.resume();
-        this._resumed = true;
-        console.log('[AudioManager] AudioContext resumed');
-      } catch (e) {
-        console.warn('[AudioManager] Failed to resume AudioContext:', e);
-      }
-    } else {
-      this._resumed = true;
+      // 同步调用 resume()，不 await —— 保持调用栈在用户手势内
+      const p = ctx.resume();
+      console.log('[AudioManager] resume() triggered in user gesture, state:', ctx.state);
+      // resume resolve 后确认状态
+      p.then(() => {
+        console.log('[AudioManager] AudioContext resumed, state:', ctx.state);
+      }).catch((e) => {
+        console.warn('[AudioManager] resume() failed:', e);
+      });
     }
   }
 
   /**
-   * 内部播放：确保 AudioContext 已激活再执行音效回调
+   * 内部播放：确保 AudioContext 处于 running 状态再执行
    */
-  private async _play(fn: (ctx: AudioContext) => void): Promise<void> {
+  private _play(fn: (ctx: AudioContext) => void): void {
     if (this._muted) return;
     const ctx = this._getContext();
     if (!ctx) return;
+
+    // 如果 suspended，尝试 resume；无论是否成功都尝试播放（iOS 首次后会是 running）
     if (ctx.state === 'suspended') {
-      try {
-        await ctx.resume();
-        this._resumed = true;
-      } catch (e) {
-        return; // resume 失败则跳过
-      }
+      ctx.resume();
     }
     fn(ctx);
   }
@@ -121,7 +119,6 @@ export class AudioManager {
       const data = buf.getChannelData(0);
       for (let i = 0; i < data.length; i++) {
         const t = i / data.length;
-        // 快速起爆 + 指数衰减
         const envelope = t < 0.02 ? t / 0.02 : Math.exp(-8 * (t - 0.02));
         data[i] = (Math.random() * 2 - 1) * envelope;
       }
@@ -160,7 +157,7 @@ export class AudioManager {
         o.connect(g);
         g.connect(ctx.destination);
         o.frequency.value = freq;
-        o.type = 'triangle'; // 三角波比方波柔和
+        o.type = 'triangle';
         const t = ctx.currentTime + i * 0.1;
         g.gain.setValueAtTime(0, t);
         g.gain.linearRampToValueAtTime(0.3, t + 0.03);
@@ -179,7 +176,6 @@ export class AudioManager {
     this._play(ctx => {
       const now = ctx.currentTime;
 
-      // 金属撞击高频
       const o = ctx.createOscillator();
       const g = ctx.createGain();
       o.connect(g);
@@ -217,21 +213,26 @@ export class AudioManager {
 
   /**
    * 开始背景音乐 — 方波低音循环节拍
+   * BGM 通过 audio 事件驱动，每步触发一次
    */
   startBGM(): void {
     const ctx = this._getContext();
     if (!ctx || this._bgmTimer) return;
 
-    // 简单循环节拍
     const notes = [130, 0, 164, 0, 146, 0, 130, 0, 164, 0, 196, 0, 174, 130, 0, 0];
     const bpm = 120;
     const stepMs = (60 / bpm) * 1000;
     this._bgmIndex = 0;
 
     const play = () => {
-      if (!this._ctx) return;
-      if (this._muted || this._ctx.state === 'suspended') {
-        // 静音或 suspended 时跳过音符但保持节拍
+      if (!this._ctx || this._bgmTimer === null) return;
+      if (this._muted) {
+        this._bgmTimer = window.setTimeout(play, stepMs);
+        return;
+      }
+      // 检查 AudioContext 状态
+      if (this._ctx.state !== 'running') {
+        this._ctx.resume();
         this._bgmTimer = window.setTimeout(play, stepMs);
         return;
       }
