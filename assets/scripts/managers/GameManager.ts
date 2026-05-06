@@ -131,10 +131,12 @@ export class GameManager extends Component {
         if (startScreen) {
           startScreen.setOnStart(() => {
             console.log('[GameManager] 开始游戏');
+            this._audioManager?.resumeContext(); // iOS: 在用户手势中激活 AudioContext
             this.startGame();
           });
           startScreen.setOnDebug(() => {
             console.log('[GameManager] 打开调试界面');
+            this._audioManager?.resumeContext(); // iOS: 在用户手势中激活 AudioContext
             this._showDebugScreen();
           });
         }
@@ -148,6 +150,7 @@ export class GameManager extends Component {
         if (this._debugScreen) {
           this._debugScreen.setOnConfirm((wave, level) => {
             console.log('[GameManager] 调试模式开始，波次:', wave, '等级:', level);
+            this._audioManager?.resumeContext(); // iOS: 在用户手势中激活 AudioContext
             this.startGame(wave, level);
           });
           this._debugScreen.setOnBack(() => {
@@ -162,8 +165,12 @@ export class GameManager extends Component {
       if (gameOverNode) {
         this._gameOverScreen = gameOverNode.getComponent(GameOverScreen);
         if (this._gameOverScreen) {
-          this._gameOverScreen.setOnRestart(() => this.restart());
+          this._gameOverScreen.setOnRestart(() => {
+            this._audioManager?.resumeContext(); // iOS: 在用户手势中激活 AudioContext
+            this.restart();
+          });
           this._gameOverScreen.setOnMenu(() => {
+            this._audioManager?.resumeContext(); // iOS: 在用户手势中激活 AudioContext
             this._audioManager?.stopBGM();
             this._state = 'start';
             if (this._gameOverScreen) this._gameOverScreen.hide();
