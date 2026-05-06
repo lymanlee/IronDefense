@@ -2,10 +2,11 @@
  * AudioManager.ts - 音效管理器
  * 使用 Web Audio API 程序生成音效
  *
- * iOS 兼容要点：
- * - AudioContext 必须在用户手势的同步调用栈内 new + resume()
- * - resume() 不需要 await，只需在同步栈内触发即可激活
- * - 音效播放前检查 state，如果 running 则直接播
+ * iOS 兼容策略：
+ * 1. 首次用户触摸时，播放一段极短的静音音频（HTMLAudioElement）来"解锁"音频硬件
+ * 2. 然后在同一个手势栈内创建 AudioContext 并 resume
+ * 3. visibility change 时处理 iOS Safari 切后台再回来的 bug
+ * 4. 所有代码保持同步，不使用 async/await（iOS 手势栈要求）
  */
 
 export class AudioManager {
@@ -13,13 +14,98 @@ export class AudioManager {
   private _muted: boolean = false;
   private _bgmTimer: number | null = null;
   private _bgmIndex: number = 0;
+  private _unlocked: boolean = false;
 
   constructor() {
-    // 不在此处创建 AudioContext（iOS 要求在用户手势中创建）
+    // 注册全局首次触摸解锁（capture 阶段，在 Cocos canvas 消费事件之前）
+    this._registerUnlock();
+    // 注册 visibility change 监听（修复 iOS 切后台回来无声）
+    this._registerVisibilityHandler();
   }
 
   /**
-   * 获取或创建 AudioContext（懒加载，仅内部使用）
+   * iOS 音频解锁：在首次用户触摸/点击的 capture 阶段，
+   * 通过播放一段静音 HTMLAudioElement 来解锁音频硬件，
+   * 然后在同一手势栈内创建并 resume AudioContext。
+   *
+   * 必须用 capture: true，因为 Cocos Canvas 会消费 touchstart 事件阻止冒泡。
+   */
+  private _registerUnlock(): void {
+    const unlock = () => {
+      if (this._unlocked) return;
+      this._unlocked = true;
+
+      console.log('[AudioManager] Attempting audio unlock via silent HTMLAudioElement');
+
+      // 方法1：通过 HTMLAudioElement 播放静音音频解锁 iOS 音频硬件
+      try {
+        const silentAudio = new Audio();
+        // 极短的静音 WAV（~1ms 纯静音）
+        silentAudio.src = 'data:audio/wav;base64,UklGRiQAAABXQVZFZm10IBAAAAABAAEARKwAAIhYAQACABAAZGF0YQAAAAA=';
+        silentAudio.volume = 0.01;
+        const playPromise = silentAudio.play();
+        if (playPromise) {
+          playPromise.then(() => {
+            console.log('[AudioManager] Silent audio played, hardware unlocked');
+            silentAudio.pause();
+            silentAudio.src = '';
+          }).catch(() => {
+            // 静音播放被拒绝没关系，继续尝试 Web Audio
+          });
+        }
+      } catch (e) {
+        console.warn('[AudioManager] Silent audio unlock failed:', e);
+      }
+
+      // 方法2：在同一个手势栈内创建 AudioContext 并 resume
+      try {
+        if (!this._ctx) {
+          this._ctx = new (window.AudioContext || (window as any).webkitAudioContext)();
+        }
+        if (this._ctx.state === 'suspended') {
+          this._ctx.resume();
+          console.log('[AudioManager] AudioContext resume() called in gesture stack');
+        }
+      } catch (e) {
+        console.warn('[AudioManager] AudioContext creation failed:', e);
+      }
+
+      // 移除监听（只需解锁一次）
+      document.removeEventListener('touchstart', unlock, true);
+      document.removeEventListener('touchend', unlock, true);
+      document.removeEventListener('click', unlock, true);
+    };
+
+    // capture: true 确保在 Cocos Canvas 消费事件之前执行
+    document.addEventListener('touchstart', unlock, true);
+    document.addEventListener('touchend', unlock, true);
+    document.addEventListener('click', unlock, true);
+  }
+
+  /**
+   * iOS Safari 在切后台再回来时，AudioContext 可能卡在 "interrupted" 状态
+   * state 显示 running 但实际不出声。
+   * workaround：visibility 恢复时 suspend → 短延迟 → resume
+   */
+  private _registerVisibilityHandler(): void {
+    document.addEventListener('visibilitychange', () => {
+      if (!this._ctx) return;
+      if (document.visibilityState === 'visible') {
+        console.log('[AudioManager] Page visible, fixing AudioContext state');
+        // suspend → 短延迟 → resume，强制 iOS 重新激活音频会话
+        this._ctx.suspend().then(() => {
+          setTimeout(() => {
+            if (this._ctx && this._ctx.state === 'suspended') {
+              this._ctx.resume();
+            }
+          }, 250);
+        });
+      }
+    });
+  }
+
+  /**
+   * 获取或创建 AudioContext
    */
   private _getContext(): AudioContext | null {
     if (!this._ctx) {
@@ -35,37 +121,23 @@ export class AudioManager {
   }
 
   /**
-   * 在用户手势的同步调用栈内调用此方法，激活 AudioContext（iOS 关键）
-   *
-   * 注意：这里不使用 await，而是同步触发 resume()。
-   * iOS Safari 只要求 resume() 的调用发起在用户手势栈内即可，
-   * 不需要等它 resolve。一旦 resume 启动，后续播放就能正常工作。
+   * 手动 resume（在按钮回调的同步栈内调用，作为补充解锁）
    */
   resumeContext(): void {
     const ctx = this._getContext();
     if (!ctx) return;
     if (ctx.state === 'suspended') {
-      // 同步调用 resume()，不 await —— 保持调用栈在用户手势内
-      const p = ctx.resume();
-      console.log('[AudioManager] resume() triggered in user gesture, state:', ctx.state);
-      // resume resolve 后确认状态
-      p.then(() => {
-        console.log('[AudioManager] AudioContext resumed, state:', ctx.state);
-      }).catch((e) => {
-        console.warn('[AudioManager] resume() failed:', e);
-      });
+      ctx.resume();
     }
   }
 
   /**
-   * 内部播放：确保 AudioContext 处于 running 状态再执行
+   * 内部播放：检查状态后执行音效回调
    */
   private _play(fn: (ctx: AudioContext) => void): void {
     if (this._muted) return;
     const ctx = this._getContext();
     if (!ctx) return;
-
-    // 如果 suspended，尝试 resume；无论是否成功都尝试播放（iOS 首次后会是 running）
     if (ctx.state === 'suspended') {
       ctx.resume();
     }
@@ -79,7 +151,6 @@ export class AudioManager {
     this._play(ctx => {
       const now = ctx.currentTime;
 
-      // 高频子弹啸叫
       const osc = ctx.createOscillator();
       const oscGain = ctx.createGain();
       osc.connect(oscGain);
@@ -92,7 +163,6 @@ export class AudioManager {
       osc.start(now);
       osc.stop(now + 0.06);
 
-      // 低频冲击感
       const sub = ctx.createOscillator();
       const subGain = ctx.createGain();
       sub.connect(subGain);
@@ -114,7 +184,6 @@ export class AudioManager {
     this._play(ctx => {
       const now = ctx.currentTime;
 
-      // 白噪声爆裂
       const buf = ctx.createBuffer(1, ctx.sampleRate * 0.3, ctx.sampleRate);
       const data = buf.getChannelData(0);
       for (let i = 0; i < data.length; i++) {
@@ -130,7 +199,6 @@ export class AudioManager {
       noiseGain.connect(ctx.destination);
       src.start(now);
 
-      // 低频冲击波
       const sub = ctx.createOscillator();
       const subGain = ctx.createGain();
       sub.connect(subGain);
@@ -146,11 +214,11 @@ export class AudioManager {
   }
 
   /**
-   * 升级音效 — 上行琶音，三角波更悦耳
+   * 升级音效 — 上行琶音，三角波
    */
   levelUp(): void {
     this._play(ctx => {
-      const notes = [523, 659, 784, 1047]; // C5 E5 G5 C6
+      const notes = [523, 659, 784, 1047];
       notes.forEach((freq, i) => {
         const o = ctx.createOscillator();
         const g = ctx.createGain();
@@ -170,7 +238,7 @@ export class AudioManager {
   }
 
   /**
-   * 敌人受击音效 — 短促金属撞击
+   * 敌人受击音效
    */
   enemyHit(): void {
     this._play(ctx => {
@@ -191,7 +259,7 @@ export class AudioManager {
   }
 
   /**
-   * 警报音效 — 双音交替
+   * 警报音效
    */
   alarm(): void {
     this._play(ctx => {
@@ -212,8 +280,7 @@ export class AudioManager {
   }
 
   /**
-   * 开始背景音乐 — 方波低音循环节拍
-   * BGM 通过 audio 事件驱动，每步触发一次
+   * 开始背景音乐
    */
   startBGM(): void {
     const ctx = this._getContext();
@@ -230,7 +297,6 @@ export class AudioManager {
         this._bgmTimer = window.setTimeout(play, stepMs);
         return;
       }
-      // 检查 AudioContext 状态
       if (this._ctx.state !== 'running') {
         this._ctx.resume();
         this._bgmTimer = window.setTimeout(play, stepMs);
