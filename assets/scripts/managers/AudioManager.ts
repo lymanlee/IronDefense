@@ -1,337 +1,159 @@
 /**
  * AudioManager.ts - 音效管理器
- * 使用 Web Audio API 程序生成音效
+ * 使用 HTMLAudioElement 播放预编码的 WAV 音效（iOS 兼容方案）
  *
- * iOS 兼容策略：
- * 1. 首次用户触摸时，播放一段极短的静音音频（HTMLAudioElement）来"解锁"音频硬件
- * 2. 然后在同一个手势栈内创建 AudioContext 并 resume
- * 3. visibility change 时处理 iOS Safari 切后台再回来的 bug
- * 4. 所有代码保持同步，不使用 async/await（iOS 手势栈要求）
+ * 为什么不用 Web Audio API：
+ * iOS Safari/WebView 对 AudioContext 有严格限制，即使用户手势栈内创建+resume，
+ * 在 Cocos Creator 游戏中仍可能无声。HTMLAudioElement.play() 在用户手势后
+ * 是 iOS 上最可靠的音频播放方式。
+ *
+ * 策略：
+ * - 音效预编码为 base64 WAV，通过 data URI 播放
+ * - SFX（射击/爆炸等）用对象池复用 HTMLAudioElement
+ * - BGM 用单个 HTMLAudioElement 循环播放
  */
 
+import { AudioData } from '../data/AudioData';
+
 export class AudioManager {
-  private _ctx: AudioContext | null = null;
   private _muted: boolean = false;
-  private _bgmTimer: number | null = null;
-  private _bgmIndex: number = 0;
-  private _unlocked: boolean = false;
+  private _bgmAudio: HTMLAudioElement | null = null;
+  private _bgmPlaying: boolean = false;
+
+  // SFX 对象池 — 避免频繁创建/销毁 HTMLAudioElement
+  private _sfxPool: Map<string, HTMLAudioElement[]> = new Map();
 
   constructor() {
-    // 注册全局首次触摸解锁（capture 阶段，在 Cocos canvas 消费事件之前）
+    // iOS: 注册首次触摸解锁（capture 阶段）
     this._registerUnlock();
-    // 注册 visibility change 监听（修复 iOS 切后台回来无声）
-    this._registerVisibilityHandler();
   }
 
   /**
-   * iOS 音频解锁：在首次用户触摸/点击的 capture 阶段，
-   * 通过播放一段静音 HTMLAudioElement 来解锁音频硬件，
-   * 然后在同一手势栈内创建并 resume AudioContext。
-   *
-   * 必须用 capture: true，因为 Cocos Canvas 会消费 touchstart 事件阻止冒泡。
+   * iOS 音频解锁：首次触摸时播放一段静音音频
    */
   private _registerUnlock(): void {
+    let unlocked = false;
     const unlock = () => {
-      if (this._unlocked) return;
-      this._unlocked = true;
-
-      console.log('[AudioManager] Attempting audio unlock via silent HTMLAudioElement');
-
-      // 方法1：通过 HTMLAudioElement 播放静音音频解锁 iOS 音频硬件
+      if (unlocked) return;
+      unlocked = true;
       try {
-        const silentAudio = new Audio();
-        // 极短的静音 WAV（~1ms 纯静音）
-        silentAudio.src = 'data:audio/wav;base64,UklGRiQAAABXQVZFZm10IBAAAAABAAEARKwAAIhYAQACABAAZGF0YQAAAAA=';
-        silentAudio.volume = 0.01;
-        const playPromise = silentAudio.play();
-        if (playPromise) {
-          playPromise.then(() => {
-            console.log('[AudioManager] Silent audio played, hardware unlocked');
-            silentAudio.pause();
-            silentAudio.src = '';
-          }).catch(() => {
-            // 静音播放被拒绝没关系，继续尝试 Web Audio
-          });
-        }
-      } catch (e) {
-        console.warn('[AudioManager] Silent audio unlock failed:', e);
-      }
-
-      // 方法2：在同一个手势栈内创建 AudioContext 并 resume
-      try {
-        if (!this._ctx) {
-          this._ctx = new (window.AudioContext || (window as any).webkitAudioContext)();
-        }
-        if (this._ctx.state === 'suspended') {
-          this._ctx.resume();
-          console.log('[AudioManager] AudioContext resume() called in gesture stack');
-        }
-      } catch (e) {
-        console.warn('[AudioManager] AudioContext creation failed:', e);
-      }
-
-      // 移除监听（只需解锁一次）
+        const a = new Audio();
+        a.src = 'data:audio/wav;base64,UklGRiQAAABXQVZFZm10IBAAAAABAAEARKwAAIhYAQACABAAZGF0YQAAAAA=';
+        a.volume = 0.01;
+        const p = a.play();
+        if (p) p.then(() => { a.pause(); a.src = ''; }).catch(() => {});
+      } catch (e) {}
       document.removeEventListener('touchstart', unlock, true);
-      document.removeEventListener('touchend', unlock, true);
       document.removeEventListener('click', unlock, true);
     };
-
-    // capture: true 确保在 Cocos Canvas 消费事件之前执行
     document.addEventListener('touchstart', unlock, true);
-    document.addEventListener('touchend', unlock, true);
     document.addEventListener('click', unlock, true);
   }
 
   /**
-   * iOS Safari 在切后台再回来时，AudioContext 可能卡在 "interrupted" 状态
-   * state 显示 running 但实际不出声。
-   * workaround：visibility 恢复时 suspend → 短延迟 → resume
+   * 从池中获取或创建 HTMLAudioElement
    */
-  private _registerVisibilityHandler(): void {
-    document.addEventListener('visibilitychange', () => {
-      if (!this._ctx) return;
-      if (document.visibilityState === 'visible') {
-        console.log('[AudioManager] Page visible, fixing AudioContext state');
-        // suspend → 短延迟 → resume，强制 iOS 重新激活音频会话
-        this._ctx.suspend().then(() => {
-          setTimeout(() => {
-            if (this._ctx && this._ctx.state === 'suspended') {
-              this._ctx.resume();
-            }
-          }, 250);
-        });
-      }
-    });
-  }
-
-  /**
-   * 获取或创建 AudioContext
-   */
-  private _getContext(): AudioContext | null {
-    if (!this._ctx) {
-      try {
-        this._ctx = new (window.AudioContext || (window as any).webkitAudioContext)();
-        console.log('[AudioManager] AudioContext created, state:', this._ctx.state);
-      } catch (e) {
-        console.warn('[AudioManager] AudioContext not available:', e);
-        return null;
+  private _getSFX(key: string): HTMLAudioElement | null {
+    // 查找空闲的
+    const pool = this._sfxPool.get(key);
+    if (pool) {
+      for (const a of pool) {
+        if (a.ended || a.paused) {
+          a.currentTime = 0;
+          return a;
+        }
       }
     }
-    return this._ctx;
-  }
-
-  /**
-   * 手动 resume（在按钮回调的同步栈内调用，作为补充解锁）
-   */
-  resumeContext(): void {
-    const ctx = this._getContext();
-    if (!ctx) return;
-    if (ctx.state === 'suspended') {
-      ctx.resume();
+    // 创建新的
+    try {
+      const a = new Audio();
+      a.src = AudioData.DATA_URI_PREFIX + (AudioData as any)[key];
+      a.preload = 'auto';
+      if (!pool) {
+        this._sfxPool.set(key, [a]);
+      } else {
+        pool.push(a);
+      }
+      return a;
+    } catch (e) {
+      return null;
     }
   }
 
   /**
-   * 内部播放：检查状态后执行音效回调
+   * 播放 SFX
    */
-  private _play(fn: (ctx: AudioContext) => void): void {
+  private _playSFX(key: string): void {
     if (this._muted) return;
-    const ctx = this._getContext();
-    if (!ctx) return;
-    if (ctx.state === 'suspended') {
-      ctx.resume();
-    }
-    fn(ctx);
+    const a = this._getSFX(key);
+    if (!a) return;
+    try {
+      a.currentTime = 0;
+      a.play().catch(() => {});
+    } catch (e) {}
   }
 
   /**
-   * 射击音效 — 高频下滑 + 低频冲击
+   * 射击音效
    */
   shoot(): void {
-    this._play(ctx => {
-      const now = ctx.currentTime;
-
-      const osc = ctx.createOscillator();
-      const oscGain = ctx.createGain();
-      osc.connect(oscGain);
-      oscGain.connect(ctx.destination);
-      osc.type = 'square';
-      osc.frequency.setValueAtTime(1200, now);
-      osc.frequency.exponentialRampToValueAtTime(300, now + 0.06);
-      oscGain.gain.setValueAtTime(0.15, now);
-      oscGain.gain.exponentialRampToValueAtTime(0.001, now + 0.06);
-      osc.start(now);
-      osc.stop(now + 0.06);
-
-      const sub = ctx.createOscillator();
-      const subGain = ctx.createGain();
-      sub.connect(subGain);
-      subGain.connect(ctx.destination);
-      sub.type = 'sine';
-      sub.frequency.setValueAtTime(150, now);
-      sub.frequency.exponentialRampToValueAtTime(50, now + 0.05);
-      subGain.gain.setValueAtTime(0.25, now);
-      subGain.gain.exponentialRampToValueAtTime(0.001, now + 0.05);
-      sub.start(now);
-      sub.stop(now + 0.05);
-    });
+    this._playSFX('shoot');
   }
 
   /**
-   * 爆炸音效 — 白噪声 + 低频 rumble
+   * 爆炸音效
    */
   explode(): void {
-    this._play(ctx => {
-      const now = ctx.currentTime;
-
-      const buf = ctx.createBuffer(1, ctx.sampleRate * 0.3, ctx.sampleRate);
-      const data = buf.getChannelData(0);
-      for (let i = 0; i < data.length; i++) {
-        const t = i / data.length;
-        const envelope = t < 0.02 ? t / 0.02 : Math.exp(-8 * (t - 0.02));
-        data[i] = (Math.random() * 2 - 1) * envelope;
-      }
-      const src = ctx.createBufferSource();
-      src.buffer = buf;
-      const noiseGain = ctx.createGain();
-      noiseGain.gain.setValueAtTime(0.35, now);
-      src.connect(noiseGain);
-      noiseGain.connect(ctx.destination);
-      src.start(now);
-
-      const sub = ctx.createOscillator();
-      const subGain = ctx.createGain();
-      sub.connect(subGain);
-      subGain.connect(ctx.destination);
-      sub.type = 'sine';
-      sub.frequency.setValueAtTime(80, now);
-      sub.frequency.exponentialRampToValueAtTime(20, now + 0.25);
-      subGain.gain.setValueAtTime(0.4, now);
-      subGain.gain.exponentialRampToValueAtTime(0.001, now + 0.25);
-      sub.start(now);
-      sub.stop(now + 0.25);
-    });
+    this._playSFX('explode');
   }
 
   /**
-   * 升级音效 — 上行琶音，三角波
+   * 升级音效
    */
   levelUp(): void {
-    this._play(ctx => {
-      const notes = [523, 659, 784, 1047];
-      notes.forEach((freq, i) => {
-        const o = ctx.createOscillator();
-        const g = ctx.createGain();
-        o.connect(g);
-        g.connect(ctx.destination);
-        o.frequency.value = freq;
-        o.type = 'triangle';
-        const t = ctx.currentTime + i * 0.1;
-        g.gain.setValueAtTime(0, t);
-        g.gain.linearRampToValueAtTime(0.3, t + 0.03);
-        g.gain.setValueAtTime(0.3, t + 0.06);
-        g.gain.exponentialRampToValueAtTime(0.001, t + 0.25);
-        o.start(t);
-        o.stop(t + 0.25);
-      });
-    });
+    this._playSFX('levelup');
   }
 
   /**
    * 敌人受击音效
    */
   enemyHit(): void {
-    this._play(ctx => {
-      const now = ctx.currentTime;
-
-      const o = ctx.createOscillator();
-      const g = ctx.createGain();
-      o.connect(g);
-      g.connect(ctx.destination);
-      o.type = 'sawtooth';
-      o.frequency.setValueAtTime(300, now);
-      o.frequency.exponentialRampToValueAtTime(100, now + 0.08);
-      g.gain.setValueAtTime(0.15, now);
-      g.gain.exponentialRampToValueAtTime(0.001, now + 0.08);
-      o.start(now);
-      o.stop(now + 0.08);
-    });
+    this._playSFX('hit');
   }
 
   /**
    * 警报音效
    */
   alarm(): void {
-    this._play(ctx => {
-      [440, 550, 440, 550].forEach((freq, i) => {
-        const o = ctx.createOscillator();
-        const g = ctx.createGain();
-        o.connect(g);
-        g.connect(ctx.destination);
-        o.frequency.value = freq;
-        o.type = 'square';
-        const t = ctx.currentTime + i * 0.1;
-        g.gain.setValueAtTime(0.25, t);
-        g.gain.exponentialRampToValueAtTime(0.001, t + 0.1);
-        o.start(t);
-        o.stop(t + 0.1);
-      });
-    });
+    this._playSFX('alarm');
   }
 
   /**
-   * 开始背景音乐
+   * 开始背景音乐（循环播放）
    */
   startBGM(): void {
-    const ctx = this._getContext();
-    if (!ctx || this._bgmTimer) return;
-
-    const notes = [130, 0, 164, 0, 146, 0, 130, 0, 164, 0, 196, 0, 174, 130, 0, 0];
-    const bpm = 120;
-    const stepMs = (60 / bpm) * 1000;
-    this._bgmIndex = 0;
-
-    const play = () => {
-      if (!this._ctx || this._bgmTimer === null) return;
-      if (this._muted) {
-        this._bgmTimer = window.setTimeout(play, stepMs);
-        return;
-      }
-      if (this._ctx.state !== 'running') {
-        this._ctx.resume();
-        this._bgmTimer = window.setTimeout(play, stepMs);
-        return;
-      }
-
-      const freq = notes[this._bgmIndex % notes.length];
-      if (freq > 0) {
-        const o = this._ctx.createOscillator();
-        const g = this._ctx.createGain();
-        o.connect(g);
-        g.connect(this._ctx.destination);
-        o.frequency.value = freq;
-        o.type = 'square';
-        const step = stepMs / 1000;
-        g.gain.setValueAtTime(0.08, this._ctx.currentTime);
-        g.gain.exponentialRampToValueAtTime(0.001, this._ctx.currentTime + step * 0.8);
-        o.start();
-        o.stop(this._ctx.currentTime + step * 0.8);
-      }
-      this._bgmIndex++;
-      this._bgmTimer = window.setTimeout(play, stepMs);
-    };
-
-    play();
+    if (this._bgmPlaying) return;
+    try {
+      this._bgmAudio = new Audio();
+      this._bgmAudio.src = AudioData.DATA_URI_PREFIX + AudioData.bgm;
+      this._bgmAudio.loop = true;
+      this._bgmAudio.volume = 0.5;
+      this._bgmAudio.play().catch(() => {});
+      this._bgmPlaying = true;
+    } catch (e) {}
   }
 
   /**
    * 停止背景音乐
    */
   stopBGM(): void {
-    if (this._bgmTimer !== null) {
-      window.clearTimeout(this._bgmTimer);
-      this._bgmTimer = null;
+    if (this._bgmAudio) {
+      this._bgmAudio.pause();
+      this._bgmAudio.currentTime = 0;
+      this._bgmAudio.src = '';
+      this._bgmAudio = null;
     }
+    this._bgmPlaying = false;
   }
 
   /**
@@ -339,6 +161,16 @@ export class AudioManager {
    */
   toggleMute(): void {
     this._muted = !this._muted;
+    if (this._bgmAudio) {
+      this._bgmAudio.muted = this._muted;
+    }
+  }
+
+  /**
+   * 保留此方法以兼容 GameManager 的调用（iOS AudioElement 方案不需要）
+   */
+  resumeContext(): void {
+    // No-op with HTMLAudioElement approach
   }
 
   get muted(): boolean {
