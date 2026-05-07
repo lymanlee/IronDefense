@@ -1,179 +1,118 @@
 /**
- * AudioManager.ts - 音效管理器
- * 使用 HTMLAudioElement 播放预编码的 WAV 音效（iOS 兼容方案）
+ * AudioManager.ts - 音频管理器（精简版）
  *
- * 为什么不用 Web Audio API：
- * iOS Safari/WebView 对 AudioContext 有严格限制，即使用户手势栈内创建+resume，
- * 在 Cocos Creator 游戏中仍可能无声。HTMLAudioElement.play() 在用户手势后
- * 是 iOS 上最可靠的音频播放方式。
+ * 设计说明：
+ * - iOS Safari 上 Cocos Creator 3.8.8 的 AudioSource 已能正常工作
+ * - 只需确保首次 play() 在用户手势内调用即可
+ * - 无需手动操作 AudioContext，引擎内部会处理
  *
- * 策略：
- * - 音效预编码为 base64 WAV，通过 data URI 播放
- * - SFX（射击/爆炸等）用对象池复用 HTMLAudioElement
- * - BGM 用单个 HTMLAudioElement 循环播放
+ * iOS 静音模式注意：
+ * iPhone 物理静音开关会让 Safari 完全静音（包括 Web Audio 和 <audio>），
+ * 这是系统级行为，代码无法绕过，只能提示用户检查静音开关。
  */
 
-import { AudioData } from '../data/AudioData';
+import { _decorator, Component, AudioSource, AudioClip, resources, error } from 'cc';
 
-export class AudioManager {
+const { ccclass, property } = _decorator;
+
+/** SFX 音效名称 → resources/audio/ 下的文件名 */
+const SFX_NAMES = ['shoot', 'explode', 'hit', 'levelup', 'alarm'];
+
+@ccclass('AudioManager')
+export class AudioManager extends Component {
+
+  // --- AudioSource 引用（需在编辑器中绑定） ---
+
+  @property({ type: AudioSource, tooltip: 'BGM 音源，在编辑器中绑定，设置 Loop=true' })
+  bgmSource: AudioSource = null!;
+
+  @property({ type: AudioSource, tooltip: 'SFX 音源，在编辑器中绑定，PlayOnAwake=false' })
+  sfxSource: AudioSource = null!;
+
+  // --- 内部状态 ---
+
+  private _clips: Map<string, AudioClip> = new Map();
   private _muted: boolean = false;
-  private _bgmAudio: HTMLAudioElement | null = null;
-  private _bgmPlaying: boolean = false;
+  private _bgmStarted: boolean = false;
 
-  // SFX 对象池 — 避免频繁创建/销毁 HTMLAudioElement
-  private _sfxPool: Map<string, HTMLAudioElement[]> = new Map();
+  // ==================== 生命周期 ====================
 
-  constructor() {
-    // iOS: 注册首次触摸解锁（capture 阶段）
-    this._registerUnlock();
+  onLoad(): void {
+    // 不需要复杂的 AudioContext 解锁逻辑
+    // Cocos 3.8.8 引擎内部已经处理了 iOS Safari 的 AudioContext 恢复
   }
 
-  /**
-   * iOS 音频解锁：首次触摸时播放一段静音音频
-   */
-  private _registerUnlock(): void {
-    let unlocked = false;
-    const unlock = () => {
-      if (unlocked) return;
-      unlocked = true;
-      try {
-        const a = new Audio();
-        a.src = 'data:audio/wav;base64,UklGRiQAAABXQVZFZm10IBAAAAABAAEARKwAAIhYAQACABAAZGF0YQAAAAA=';
-        a.volume = 0.01;
-        const p = a.play();
-        if (p) p.then(() => { a.pause(); a.src = ''; }).catch(() => {});
-      } catch (e) {}
-      document.removeEventListener('touchstart', unlock, true);
-      document.removeEventListener('click', unlock, true);
-    };
-    document.addEventListener('touchstart', unlock, true);
-    document.addEventListener('click', unlock, true);
+  start(): void {
+    this._loadAllClips();
   }
 
-  /**
-   * 从池中获取或创建 HTMLAudioElement
-   */
-  private _getSFX(key: string): HTMLAudioElement | null {
-    // 查找空闲的
-    const pool = this._sfxPool.get(key);
-    if (pool) {
-      for (const a of pool) {
-        if (a.ended || a.paused) {
-          a.currentTime = 0;
-          return a;
-        }
-      }
-    }
-    // 创建新的
-    try {
-      const a = new Audio();
-      a.src = AudioData.DATA_URI_PREFIX + (AudioData as any)[key];
-      a.preload = 'auto';
-      if (!pool) {
-        this._sfxPool.set(key, [a]);
-      } else {
-        pool.push(a);
-      }
-      return a;
-    } catch (e) {
-      return null;
-    }
-  }
+  // ==================== 公开接口 ====================
 
   /**
-   * 播放 SFX
-   */
-  private _playSFX(key: string): void {
-    if (this._muted) return;
-    const a = this._getSFX(key);
-    if (!a) return;
-    try {
-      a.currentTime = 0;
-      a.play().catch(() => {});
-    } catch (e) {}
-  }
-
-  /**
-   * 射击音效
-   */
-  shoot(): void {
-    this._playSFX('shoot');
-  }
-
-  /**
-   * 爆炸音效
-   */
-  explode(): void {
-    this._playSFX('explode');
-  }
-
-  /**
-   * 升级音效
-   */
-  levelUp(): void {
-    this._playSFX('levelup');
-  }
-
-  /**
-   * 敌人受击音效
-   */
-  enemyHit(): void {
-    this._playSFX('hit');
-  }
-
-  /**
-   * 警报音效
-   */
-  alarm(): void {
-    this._playSFX('alarm');
-  }
-
-  /**
-   * 开始背景音乐（循环播放）
+   * 在用户点击"开始游戏"按钮时调用
+   * 确保在用户手势内触发，iOS Safari 要求首次音频播放必须有用户交互
    */
   startBGM(): void {
-    if (this._bgmPlaying) return;
-    try {
-      this._bgmAudio = new Audio();
-      this._bgmAudio.src = AudioData.DATA_URI_PREFIX + AudioData.bgm;
-      this._bgmAudio.loop = true;
-      this._bgmAudio.volume = 0.5;
-      this._bgmAudio.play().catch(() => {});
-      this._bgmPlaying = true;
-    } catch (e) {}
-  }
-
-  /**
-   * 停止背景音乐
-   */
-  stopBGM(): void {
-    if (this._bgmAudio) {
-      this._bgmAudio.pause();
-      this._bgmAudio.currentTime = 0;
-      this._bgmAudio.src = '';
-      this._bgmAudio = null;
+    if (this._bgmStarted) return;
+    if (!this.bgmSource) {
+      console.warn('[AudioManager] bgmSource is null!');
+      return;
     }
-    this._bgmPlaying = false;
+    if (!this.bgmSource.clip) {
+      console.warn('[AudioManager] bgmSource.clip is null! 请在编辑器中绑定 BGM AudioClip。');
+      return;
+    }
+    this.bgmSource.loop = true;
+    this.bgmSource.volume = this._muted ? 0 : 0.5;
+    this.bgmSource.play();
+    this._bgmStarted = true;
+    console.log(`[AudioManager] BGM started: ${this.bgmSource.clip.name}`);
   }
 
-  /**
-   * 静音切换
-   */
+  stopBGM(): void {
+    if (!this.bgmSource) return;
+    this.bgmSource.stop();
+    this._bgmStarted = false;
+  }
+
+  // --- SFX ---
+
+  shoot(): void { this._playSFX('shoot'); }
+  explode(): void { this._playSFX('explode'); }
+  enemyHit(): void { this._playSFX('hit'); }
+  levelUp(): void { this._playSFX('levelup'); }
+  alarm(): void { this._playSFX('alarm'); }
+
+  // --- 控制 ---
+
   toggleMute(): void {
     this._muted = !this._muted;
-    if (this._bgmAudio) {
-      this._bgmAudio.muted = this._muted;
+    if (this.bgmSource) {
+      this.bgmSource.volume = this._muted ? 0 : 0.5;
     }
   }
 
-  /**
-   * 保留此方法以兼容 GameManager 的调用（iOS AudioElement 方案不需要）
-   */
-  resumeContext(): void {
-    // No-op with HTMLAudioElement approach
+  get muted(): boolean { return this._muted; }
+
+  // ==================== 内部方法 ====================
+
+  private _loadAllClips(): void {
+    for (const name of SFX_NAMES) {
+      resources.load(`audio/${name}`, AudioClip, (err, clip) => {
+        if (err) {
+          error(`[AudioManager] 加载 audio/${name} 失败:`, err.message);
+          return;
+        }
+        this._clips.set(name, clip);
+        console.log(`[AudioManager] SFX loaded: ${name}`);
+      });
+    }
   }
 
-  get muted(): boolean {
-    return this._muted;
+  private _playSFX(name: string): void {
+    if (this._muted) return;
+    const clip = this._clips.get(name);
+    if (!clip || !this.sfxSource) return;
+    this.sfxSource.playOneShot(clip, 1.0);
   }
 }

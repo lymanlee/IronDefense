@@ -37,12 +37,12 @@ export const GameConfig = {
   // count: 发射方向数, spread: 相邻夹角(度), multiShot: 每方向连发数, speedMults: 每颗子弹速度倍率
   // ============================================
   firePatterns: [
-    { count: 3, spread: 15, multiShot: 1, speedMults: [1.0] },
-    { count: 4, spread: 10, multiShot: 1, speedMults: [1.0] },
-    { count: 5, spread: 10, multiShot: 1, speedMults: [1.0] },
-    { count: 5, spread: 10, multiShot: 2, speedMults: [1.0, 0.95] },
-    { count: 5, spread: 10, multiShot: 3, speedMults: [1.0, 0.95, 0.90] },
-    { count: 5, spread: 10, multiShot: 4, speedMults: [1.0, 0.95, 0.90, 0.85] },
+    { count: 3, spread: 7, multiShot: 1, speedMults: [1.0] },
+    { count: 4, spread: 7, multiShot: 1, speedMults: [1.0] },
+    { count: 5, spread: 7, multiShot: 1, speedMults: [1.0] },
+    { count: 5, spread: 7, multiShot: 2, speedMults: [1.0, 0.95] },
+    { count: 5, spread: 7, multiShot: 3, speedMults: [1.0, 0.95, 0.90] },
+    { count: 5, spread: 7, multiShot: 4, speedMults: [1.0, 0.95, 0.90, 0.85] },
   ],
   },
 
@@ -50,7 +50,7 @@ export const GameConfig = {
   // 子弹
   // ============================================
   bullet: {
-    speed: [550, 550, 600, 600, 620, 680],    // 按等级
+    speed: [1000, 1100, 1200, 1300, 1400, 1500],    // 按等级
     damage: [15, 25, 40, 60, 90, 130],         // 按等级（满级一枪一个）
     fireRate: [3.5, 3.5, 4.0, 4.0, 4.5, 5.5], // 每秒发射次数 按等级
     radius: 8,                                  // 碰撞半径

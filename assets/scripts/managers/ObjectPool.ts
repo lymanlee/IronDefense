@@ -44,20 +44,25 @@ export class ObjectPool<T extends Component> {
   put(component: T): void {
     const node = component.node;
     node.active = false;
+    // swap-and-pop: O(1) 移除，避免 indexOf + splice 的 O(n) 开销
     const idx = this._active.indexOf(node);
     if (idx !== -1) {
-      this._active.splice(idx, 1);
+      const last = this._active.length - 1;
+      if (idx !== last) {
+        this._active[idx] = this._active[last];
+      }
+      this._active.pop();
     }
     this._pool.push(node);
   }
 
   putAll(): void {
-    while (this._active.length > 0) {
-      const node = this._active[0];
-      node.active = false;
-      this._pool.push(node);
-      this._active.splice(0, 1);
+    // O(n) 批量回收，避免 splice(0,1) 循环的 O(n²) 开销
+    for (let i = 0; i < this._active.length; i++) {
+      this._active[i].active = false;
+      this._pool.push(this._active[i]);
     }
+    this._active.length = 0;
   }
 
   get activeCount(): number {

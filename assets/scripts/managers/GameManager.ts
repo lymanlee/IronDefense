@@ -71,6 +71,10 @@ export class GameManager extends Component {
   private _explosions: ExplosionData[] = [];
   private _kills: number = 0;
 
+  // 固定时间步长（避免帧率抖动导致子弹/敌人移动跳跃）
+  private readonly _FIXED_DT: number = 1 / 60;  // 60Hz 固定步长
+  private _accumulator: number = 0;
+
   // UI 引用
   private _hud: HUDController | null = null;
   private _startScreenNode: Node | null = null;
@@ -86,7 +90,8 @@ export class GameManager extends Component {
     // 初始化系统
     this._expSystem = new ExpSystem();
     this._waveManager = new WaveManager();
-    this._audioManager = new AudioManager();
+    // AudioManager 现在是场景组件，通过 find 获取
+    this._audioManager = this.node.getComponent(AudioManager);
 
     // 初始化对象池
     if (this.bulletPrefab) {
@@ -101,7 +106,10 @@ export class GameManager extends Component {
       this._waveManager.setEnemyFactory(() => {
         const enemy = this._enemyPool!.get();
         if (enemy) {
-          this.enemiesNode?.addChild(enemy.node);
+          // 只在首次挂载时 addChild，避免重复挂载
+          if (!enemy.node.parent && this.enemiesNode) {
+            this.enemiesNode.addChild(enemy.node);
+          }
         }
         return enemy;
       });
@@ -131,12 +139,10 @@ export class GameManager extends Component {
         if (startScreen) {
           startScreen.setOnStart(() => {
             console.log('[GameManager] 开始游戏');
-            this._audioManager?.resumeContext(); // iOS: 在用户手势中激活 AudioContext
             this.startGame();
           });
           startScreen.setOnDebug(() => {
             console.log('[GameManager] 打开调试界面');
-            this._audioManager?.resumeContext(); // iOS: 在用户手势中激活 AudioContext
             this._showDebugScreen();
           });
         }
@@ -150,7 +156,6 @@ export class GameManager extends Component {
         if (this._debugScreen) {
           this._debugScreen.setOnConfirm((wave, level) => {
             console.log('[GameManager] 调试模式开始，波次:', wave, '等级:', level);
-            this._audioManager?.resumeContext(); // iOS: 在用户手势中激活 AudioContext
             this.startGame(wave, level);
           });
           this._debugScreen.setOnBack(() => {
@@ -166,11 +171,9 @@ export class GameManager extends Component {
         this._gameOverScreen = gameOverNode.getComponent(GameOverScreen);
         if (this._gameOverScreen) {
           this._gameOverScreen.setOnRestart(() => {
-            this._audioManager?.resumeContext(); // iOS: 在用户手势中激活 AudioContext
             this.restart();
           });
           this._gameOverScreen.setOnMenu(() => {
-            this._audioManager?.resumeContext(); // iOS: 在用户手势中激活 AudioContext
             this._audioManager?.stopBGM();
             this._state = 'start';
             if (this._gameOverScreen) this._gameOverScreen.hide();
@@ -286,7 +289,17 @@ export class GameManager extends Component {
         // 非游戏状态不更新逻辑
         break;
       case 'playing':
-        this._updatePlaying(dt);
+        // 固定时间步长：累积真实 dt，按固定间隔更新逻辑
+        // 防止帧率抖动（尤其游戏开始时）导致子弹/敌人位移跳跃
+        this._accumulator += dt;
+        // 上限防 死 spiral：如果某帧卡太久，最多补 5 帧逻辑
+        if (this._accumulator > this._FIXED_DT * 5) {
+          this._accumulator = this._FIXED_DT * 5;
+        }
+        while (this._accumulator >= this._FIXED_DT) {
+          this._updatePlaying(this._FIXED_DT);
+          this._accumulator -= this._FIXED_DT;
+        }
         break;
     }
   }
@@ -363,14 +376,20 @@ export class GameManager extends Component {
     // 自动射击
     this._playerCar.tryFire(enemies, dt);
 
-    // 回收死亡子弹到对象池
-    const deadBullets = this._bullets.filter(b => b.dead);
-    for (const b of deadBullets) {
-      this._bulletPool?.put(b);
+    // 回收死亡子弹到对象池（swap-and-pop，零分配）
+    for (let i = this._bullets.length - 1; i >= 0; i--) {
+      if (this._bullets[i].dead) {
+        this._bulletPool?.put(this._bullets[i]);
+        // swap-and-pop: O(1) 移除，避免 filter 创建新数组
+        const last = this._bullets.length - 1;
+        if (i !== last) {
+          this._bullets[i] = this._bullets[last];
+        }
+        this._bullets.pop();
+      }
     }
-    this._bullets = this._bullets.filter(b => !b.dead);
     // 更新子弹位置
-    this._bullets.forEach(b => b.update(dt));
+    this._bullets.forEach(b => b.tickMove(dt));
 
     // 同步 _enemies 数组用于碰撞检测
     this._enemies = enemies;
@@ -381,10 +400,9 @@ export class GameManager extends Component {
     // 更新爆炸
     this._updateExplosions(dt);
 
-    // 清理死亡敌人并回收到对象池
+    // 清理死亡敌人并回收到对象池（节点保留在父节点下，通过 active 控制显隐）
     const removedEnemies = this._waveManager.cleanupEnemies(dt);
     for (const enemy of removedEnemies) {
-      this.enemiesNode?.removeChild(enemy.node);
       this._enemyPool?.put(enemy);
     }
   }
@@ -430,8 +448,10 @@ export class GameManager extends Component {
         if (e.dead) continue;
         const dx = b.x - e.x;
         const dy = b.y - e.y;
-        const dist = Math.sqrt(dx * dx + dy * dy);
-        if (dist < eCfg.width / 2 + bCfg.radius) {
+        // 距离平方比较，避免 Math.sqrt 开方运算
+        const threshold = eCfg.width / 2 + bCfg.radius;
+        const distSq = dx * dx + dy * dy;
+        if (distSq < threshold * threshold) {
           b.dead = true;
           b.node.active = false;
           e.takeDamage(b.damage);
@@ -460,7 +480,10 @@ export class GameManager extends Component {
     const bullet = this._bulletPool.get();
     if (bullet) {
       bullet.init(x, y, level, angle, speedMult);
-      this.bulletPoolNode.addChild(bullet.node);
+      // 只在首次挂载时 addChild，避免重复挂载触发 transform 重建
+      if (!bullet.node.parent) {
+        this.bulletPoolNode.addChild(bullet.node);
+      }
       this._bullets.push(bullet);
     }
   }
@@ -544,6 +567,9 @@ export class GameManager extends Component {
     }
     graphics.clear();
 
+    // 预缓存 Color 对象，避免每个粒子每帧 new Color()
+    const _colorCache = new Color();
+
     this._explosions = this._explosions.filter(ex => {
       ex.life -= dt * 1.8;
       if (ex.life <= 0) return false;
@@ -559,9 +585,9 @@ export class GameManager extends Component {
       ex.particles.forEach(p => {
         if (p.life <= 0) return;
         const alpha = Math.floor(p.life * 255);
-        const c = new Color().fromHEX(p.color);
-        c.a = alpha;
-        graphics.fillColor = c;
+        _colorCache.fromHEX(p.color);
+        _colorCache.a = alpha;
+        graphics.fillColor = _colorCache;
         graphics.circle(p.x, p.y, Math.max(0.5, p.r * p.life));
         graphics.fill();
       });
@@ -577,6 +603,7 @@ export class GameManager extends Component {
     this._kills = 0;
     this._bullets = [];
     this._explosions = [];
+    this._accumulator = 0;
 
     // 恢复并重置闪红效果
     if (this._damageFlashNode) {
@@ -611,7 +638,7 @@ export class GameManager extends Component {
     // 开始第一波
     this._waveManager?.startWave();
 
-    // 播放BGM
+    // 播放 BGM（在用户点击"开始游戏"的同步调用栈中，iOS 要求首次音频在用户手势内）
     this._audioManager?.startBGM();
 
     // 切换 UI 状态

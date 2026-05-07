@@ -1,9 +1,9 @@
 /**
  * Bullet.ts - 子弹组件
- * 控制子弹移动和碰撞标记
+ * 使用 Sprite + SpriteFrame 渲染（替代 Graphics），支持合批降低 DrawCall
  */
 
-import { _decorator, Component, Graphics, Color, Sprite } from 'cc';
+import { _decorator, Component, Color, Sprite, SpriteFrame, UITransform, Size } from 'cc';
 import { GameConfig } from '../data/GameConfig';
 
 const { ccclass, property } = _decorator;
@@ -21,6 +21,8 @@ export class Bullet extends Component {
   private _vx: number = 0;       // X轴速度分量
   private _vy: number = 0;       // Y轴速度分量
   private _speedMult: number = 1.0; // 速度倍率（用于连发子弹差异化）
+  private _lastColorLevel: number = -1; // 缓存上次颜色等级
+  private _sprite: Sprite | null = null;
 
   /**
    * 初始化子弹
@@ -49,31 +51,34 @@ export class Bullet extends Component {
     this._vy = this._speed * Math.sin(rad);
 
     this.node.setPosition(x, y, 0);
-    this._drawBullet();
+    this._applyColor();
   }
 
   /**
-   * 绘制子弹（使用 Graphics，不依赖缺失的图片资源）
+   * 设置子弹颜色（通过 Sprite.color tint 白色精灵图）
+   * 只在等级变化时才更新，避免每帧设置 color
    */
-  private _drawBullet(): void {
-    // prefab 中已将 Sprite 替换为 Graphics，直接获取绘制
-    let graphics = this.node.getComponent(Graphics);
-    if (!graphics) {
-      graphics = this.node.addComponent(Graphics);
-    }
-    const color = this.color;
-    const r = GameConfig.bullet.radius;
+  private _applyColor(): void {
+    if (this._level === this._lastColorLevel) return;
+    this._lastColorLevel = this._level;
 
-    graphics.clear();
-    graphics.fillColor = new Color().fromHEX(color);
-    graphics.circle(0, 0, r);
-    graphics.fill();
+    // 懒获取 Sprite 组件
+    if (!this._sprite) {
+      this._sprite = this.node.getComponent(Sprite);
+    }
+    if (!this._sprite) return;
+
+    const colorHex = this.color;
+    const c = new Color().fromHEX(colorHex);
+    this._sprite.color = c;
   }
 
   /**
    * 更新子弹位置（按角度飞行）
+   * 注意：使用 tickMove 而非 update，避免 Cocos 引擎自动调用 lifecycle update
+   * 与 GameManager._bullets.forEach(b => b.tickMove(dt)) 配合，确保每帧只更新一次
    */
-  update(dt: number): void {
+  tickMove(dt: number): void {
     this._x += this._vx * dt;
     this._y += this._vy * dt;
     this.node.setPosition(this._x, this._y, 0);
@@ -135,7 +140,7 @@ export class Bullet extends Component {
   }
 
   /**
-   * 获取子弹颜色
+   * 获取子弹颜色（HEX 字符串）
    */
   get color(): string {
     const idx = Math.min(this._level, GameConfig.bulletColors.length - 1);
@@ -158,6 +163,7 @@ export class Bullet extends Component {
     this._vy = 0;
     this._angle = 90;
     this._speedMult = 1.0;
+    this._lastColorLevel = -1;
     this.node.setPosition(0, -2000, 0);
   }
 }
