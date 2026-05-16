@@ -1,6 +1,6 @@
 /**
- * ExpSystem.ts - 经验/升级系统
- * 管理玩家经验获取和武器等级提升
+ * ExpSystem.ts - 武器等级系统
+ * 管理武器等级、射击参数与分支解锁
  */
 
 import { GameConfig } from '../data/GameConfig';
@@ -110,22 +110,16 @@ export class ExpSystem {
     return GameConfig.weaponNames[idx];
   }
 
+  get canOfferEvolution(): boolean {
+    return this._level + 1 >= GameConfig.gameplay.weaponEvolution.unlockLevel;
+  }
+
   /**
    * 获取当前等级的发射模式配置
    */
   get firePattern(): { count: number; spread: number; multiShot: number; speedMults: number[] } {
     const idx = Math.min(this._level, GameConfig.car.firePatterns.length - 1);
     return GameConfig.car.firePatterns[idx];
-  }
-
-  /**
-   * 经验进度百分比 [0, 1]
-   * 超出配置范围后继续按外推值计算进度
-   */
-  get progressPct(): number {
-    const currentLevelExp = this._getRequiredExp(this._level);
-    const nextLevelExp = this._getRequiredExp(this._level + 1);
-    return Math.min(1, (this._exp - currentLevelExp) / (nextLevelExp - currentLevelExp));
   }
 
   /**

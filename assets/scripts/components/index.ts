@@ -6,3 +6,4 @@ export * from './PlayerCar';
 export * from './Enemy';
 export * from './Bullet';
 export * from './ExpSystem';
+export * from './SupplyChest';

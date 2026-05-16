@@ -3,7 +3,7 @@
  * 显示 Game Over 或 Victory，以及统计数据
  */
 
-import { _decorator, Component, Label } from 'cc';
+import { _decorator, Component, Label, Node, UITransform, Button, Graphics, Color } from 'cc';
 
 const { ccclass, property } = _decorator;
 
@@ -12,6 +12,10 @@ export class GameOverScreen extends Component {
   // 回调
   private _onRestart: (() => void) | null = null;
   private _onMenu: (() => void) | null = null;
+  private _onDoubleReward: (() => void) | null = null;
+  private _doubleRewardButton: Node | null = null;
+  private _doubleRewardLabel: Label | null = null;
+  private _doubleRewardEnabled: boolean = true;
 
   @property(Label)
   titleLabel: Label | null = null;
@@ -34,9 +38,17 @@ export class GameOverScreen extends Component {
   }
 
   /**
+   * 设置结算双倍广告回调
+   */
+  setOnDoubleReward(callback: () => void): void {
+    this._onDoubleReward = callback;
+    this._ensureDoubleRewardButton();
+  }
+
+  /**
    * 显示 Game Over
    */
-  showGameOver(kills: number, wave: number, exp: number, level: number): void {
+  showGameOver(stageLabel: string, kills: number, wave: number, progressText: string, coins: number = 0, parts: number = 0): void {
     if (this.titleLabel) {
       this.titleLabel.string = 'GAME OVER';
       // 红色
@@ -45,15 +57,16 @@ export class GameOverScreen extends Component {
       }
     }
     if (this.statsLabel) {
-      this.statsLabel.string = `击杀: ${kills}  波次: ${wave}\n经验: ${exp}  等级: Lv${level}`;
+      this.statsLabel.string = `关卡: ${stageLabel}  波次: ${wave}\n击杀: ${kills}\n${progressText}\n金币: ${coins}  零件: ${parts}`;
     }
+    this.setDoubleRewardAvailable(true, '看广告双倍奖励');
     this.node.active = true;
   }
 
   /**
    * 显示胜利
    */
-  showVictory(kills: number, wave: number, exp: number, level: number): void {
+  showVictory(stageLabel: string, kills: number, wave: number, progressText: string, coins: number = 0, parts: number = 0): void {
     if (this.titleLabel) {
       this.titleLabel.string = '胜利!';
       // 金色
@@ -62,8 +75,9 @@ export class GameOverScreen extends Component {
       }
     }
     if (this.statsLabel) {
-      this.statsLabel.string = `击杀: ${kills}  波次: ${wave}\n经验: ${exp}  等级: Lv${level}`;
+      this.statsLabel.string = `关卡: ${stageLabel}  波次: ${wave}\n击杀: ${kills}\n${progressText}\n金币: ${coins}  零件: ${parts}`;
     }
+    this.setDoubleRewardAvailable(true, '看广告双倍奖励');
     this.node.active = true;
   }
 
@@ -86,9 +100,61 @@ export class GameOverScreen extends Component {
   }
 
   /**
+   * 点击结算双倍奖励
+   */
+  onDoubleRewardClicked(): void {
+    if (!this._doubleRewardEnabled) return;
+    if (this._onDoubleReward) {
+      this._onDoubleReward();
+    }
+  }
+
+  setDoubleRewardAvailable(available: boolean, text: string): void {
+    this._ensureDoubleRewardButton();
+    this._doubleRewardEnabled = available;
+    if (this._doubleRewardLabel) {
+      this._doubleRewardLabel.string = text;
+      this._doubleRewardLabel.color = available ? new Color(80, 40, 0) : new Color(160, 160, 160);
+    }
+  }
+
+  /**
    * 隐藏界面
    */
   hide(): void {
     this.node.active = false;
+  }
+
+  private _ensureDoubleRewardButton(): void {
+    if (this._doubleRewardButton?.isValid) return;
+
+    const parent = this.node.getChildByName('Bg') || this.node;
+    const buttonNode = new Node('DoubleRewardBtn');
+    const transform = buttonNode.addComponent(UITransform);
+    transform.setContentSize(300, 70);
+    buttonNode.setPosition(0, -95, 0);
+
+    const graphics = buttonNode.addComponent(Graphics);
+    graphics.fillColor = new Color(255, 210, 92, 255);
+    graphics.roundRect(-150, -35, 300, 70, 12);
+    graphics.fill();
+
+    buttonNode.addComponent(Button);
+    buttonNode.on(Node.EventType.TOUCH_END, this.onDoubleRewardClicked, this);
+
+    const labelNode = new Node('Label');
+    const labelTransform = labelNode.addComponent(UITransform);
+    labelTransform.setContentSize(260, 44);
+    this._doubleRewardLabel = labelNode.addComponent(Label);
+    this._doubleRewardLabel.string = '看广告双倍奖励';
+    this._doubleRewardLabel.fontSize = 26;
+    this._doubleRewardLabel.lineHeight = 34;
+    this._doubleRewardLabel.horizontalAlign = Label.HorizontalAlign.CENTER;
+    this._doubleRewardLabel.verticalAlign = Label.VerticalAlign.CENTER;
+    this._doubleRewardLabel.color = new Color(80, 40, 0);
+    buttonNode.addChild(labelNode);
+
+    parent.addChild(buttonNode);
+    this._doubleRewardButton = buttonNode;
   }
 }

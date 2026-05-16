@@ -10,6 +10,12 @@ import { Enemy } from './Enemy';
 
 const { ccclass, property } = _decorator;
 
+export interface AttackTarget {
+  x: number;
+  y: number;
+  dead: boolean;
+}
+
 @ccclass('PlayerCar')
 export class PlayerCar extends Component {
   // 位置
@@ -19,13 +25,17 @@ export class PlayerCar extends Component {
   // 状态
   private _hp: number = 200;
   private _maxHp: number = 200;
+  private _baseMaxHp: number = 200;
   private _dead: boolean = false;
+  private _invulnerableTimer: number = 0;
 
   // 经验系统引用
   private _expSystem: ExpSystem | null = null;
 
   // 射击
   private _fireTimer: number = 0;
+  private _fireRateMultiplier: number = 1;
+  private _damageMultiplier: number = 1;
 
   // 控制
   private static readonly TOUCH_SENSITIVITY: number = 0.6; // 手指速度 → 坦克速度的倍率
@@ -54,6 +64,7 @@ export class PlayerCar extends Component {
     const cfg = GameConfig;
     this._x = 0;
     this._y = cfg.bridge.carY;
+    this._baseMaxHp = cfg.car.hp;
     this._maxHp = cfg.car.hp;
     this._hp = cfg.car.hp;
     this.node.setPosition(this._x, this._y, 0);
@@ -128,6 +139,10 @@ export class PlayerCar extends Component {
    */
   update(dt: number): void {
     if (this._dead) return;
+
+    if (this._invulnerableTimer > 0) {
+      this._invulnerableTimer = Math.max(0, this._invulnerableTimer - dt);
+    }
 
     const { width } = GameConfig.canvas;
     const { left, right } = GameConfig.bridge;
@@ -206,18 +221,18 @@ export class PlayerCar extends Component {
   /**
    * 尝试射击（按角度扇形发射）
    */
-  tryFire(enemies: Enemy[], dt: number): void {
+  tryFire(targets: AttackTarget[], dt: number): void {
     if (this._dead || !this._expSystem) return;
 
     // 没有可用目标时不累加计时器
-    const target = this._findTarget(enemies);
+    const target = this._findTarget(targets);
     if (!target) {
       this._fireTimer = 0;
       return;
     }
 
     this._fireTimer += dt;
-    const rate = this._expSystem.fireRate;
+    const rate = this._expSystem.fireRate * this._fireRateMultiplier;
 
     if (this._fireTimer < 1 / rate) return;
 
@@ -264,16 +279,16 @@ export class PlayerCar extends Component {
   /**
    * 找最近敌人
    */
-  private _findTarget(enemies: Enemy[]): Enemy | null {
-    let closest: Enemy | null = null;
+  private _findTarget(targets: AttackTarget[]): AttackTarget | null {
+    let closest: AttackTarget | null = null;
     let minDist = Infinity;
 
-    for (const e of enemies) {
-      if (e.dead) continue;
-      const d = Math.abs(e.x - this._x) + Math.abs(this._y - e.y);
+    for (const target of targets) {
+      if (target.dead) continue;
+      const d = Math.abs(target.x - this._x) + Math.abs(this._y - target.y);
       if (d < minDist) {
         minDist = d;
-        closest = e;
+        closest = target;
       }
     }
 
@@ -285,11 +300,60 @@ export class PlayerCar extends Component {
    */
   takeDamage(dmg: number): void {
     if (this._dead) return;
+    if (this._invulnerableTimer > 0) return;
     this._hp -= dmg;
     if (this._hp <= 0) {
       this._hp = 0;
       this._dead = true;
     }
+  }
+
+  /**
+   * 恢复血量
+   */
+  heal(amount: number): void {
+    if (amount <= 0) return;
+    this._hp = Math.min(this._maxHp, this._hp + amount);
+  }
+
+  /**
+   * 提升最大生命，并可选择同步回复
+   */
+  increaseMaxHp(amount: number, healAmount: number = 0): void {
+    if (amount <= 0) return;
+    this._maxHp += amount;
+    this._hp = Math.min(this._maxHp, this._hp + Math.max(0, healAmount));
+  }
+
+  /**
+   * 广告复活
+   */
+  reviveWithHpRatio(ratio: number, invulnerableSeconds: number = 0): void {
+    this._dead = false;
+    this._hp = Math.max(1, Math.ceil(this._maxHp * Math.max(0, Math.min(1, ratio))));
+    this._invulnerableTimer = Math.max(this._invulnerableTimer, invulnerableSeconds);
+    this._fireTimer = 0;
+  }
+
+  /**
+   * 设置临时无敌
+   */
+  setInvulnerable(seconds: number): void {
+    this._invulnerableTimer = Math.max(this._invulnerableTimer, seconds);
+  }
+
+  /**
+   * 设置射速倍率
+   */
+  setFireRateMultiplier(multiplier: number): void {
+    this._fireRateMultiplier = Math.max(0.2, multiplier);
+  }
+
+  setPermanentStats(maxHp: number, damageMultiplier: number): void {
+    this._baseMaxHp = Math.max(1, Math.round(maxHp));
+    this._maxHp = this._baseMaxHp;
+    this._hp = Math.min(this._hp, this._maxHp);
+    this._damageMultiplier = Math.max(0.5, damageMultiplier);
   }
 
   /**
@@ -345,6 +409,9 @@ export class PlayerCar extends Component {
   get dead(): boolean { return this._dead; }
   get x(): number { return this._x; }
   get y(): number { return this._y; }
+  get invulnerable(): boolean { return this._invulnerableTimer > 0; }
+  get damageMultiplier(): number { return this._damageMultiplier; }
+  get fireRateMultiplier(): number { return this._fireRateMultiplier; }
 
   /**
    * 重置
@@ -353,9 +420,13 @@ export class PlayerCar extends Component {
     const cfg = GameConfig;
     this._x = 0;
     this._y = cfg.bridge.carY;
-    this._hp = cfg.car.hp;
+    this._baseMaxHp = Math.max(this._baseMaxHp, cfg.car.hp);
+    this._maxHp = this._baseMaxHp;
+    this._hp = this._baseMaxHp;
     this._dead = false;
+    this._invulnerableTimer = 0;
     this._fireTimer = 0;
+    this._fireRateMultiplier = 1;
     this._dragging = false;
     this._lastTouchX = 0;
     this._lastTouchMoveTime = 0;

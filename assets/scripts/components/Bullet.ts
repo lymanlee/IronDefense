@@ -3,8 +3,8 @@
  * 使用 Sprite + SpriteFrame 渲染（替代 Graphics），支持合批降低 DrawCall
  */
 
-import { _decorator, Component, Color, Sprite, SpriteFrame, UITransform, Size } from 'cc';
-import { GameConfig } from '../data/GameConfig';
+import { _decorator, Component, Color, Sprite } from 'cc';
+import { GameConfig, WeaponBehavior, WeaponEvolutionData } from '../data/GameConfig';
 
 const { ccclass, property } = _decorator;
 
@@ -23,6 +23,14 @@ export class Bullet extends Component {
   private _speedMult: number = 1.0; // 速度倍率（用于连发子弹差异化）
   private _lastColorLevel: number = -1; // 缓存上次颜色等级
   private _sprite: Sprite | null = null;
+  private _behavior: WeaponBehavior = 'normal';
+  private _explodeRadius: number = 0;
+  private _splashMultiplier: number = 0;
+  private _remainingPierce: number = 0;
+  private _chainCount: number = 0;
+  private _chainRange: number = 0;
+  private _chainMultiplier: number = 0;
+  private _evolutionTint: string | null = null;
 
   /**
    * 初始化子弹
@@ -31,19 +39,39 @@ export class Bullet extends Component {
    * @param level 子弹等级
    * @param angle 发射角度（度），90°=垂直向上，0°=水平向右
    * @param speedMult 速度倍率（用于连发子弹差异化）
+   * @param damageMultiplier 临时伤害倍率（补给效果）
    */
-  init(x: number, y: number, level: number, angle: number = 90, speedMult: number = 1.0): void {
+  init(
+    x: number,
+    y: number,
+    level: number,
+    angle: number = 90,
+    speedMult: number = 1.0,
+    damageMultiplier: number = 1.0,
+    evolution: WeaponEvolutionData | null = null
+  ): void {
     this._x = x;
     this._y = y;
     this._level = level;
     this._angle = angle;
     this._speedMult = speedMult;
     this._dead = false;
+    this._behavior = evolution?.behavior || 'normal';
+    this._explodeRadius = evolution?.explodeRadius || 0;
+    this._splashMultiplier = evolution?.splashMultiplier || 0;
+    this._remainingPierce = evolution?.pierceCount || 0;
+    this._chainCount = evolution?.chainCount || 0;
+    this._chainRange = evolution?.chainRange || 0;
+    this._chainMultiplier = evolution?.chainMultiplier || 0;
+    this._evolutionTint = evolution?.tint || null;
 
     const idx = Math.min(level, GameConfig.bullet.speed.length - 1);
     const baseSpeed = GameConfig.bullet.speed[idx];
     this._speed = baseSpeed * speedMult;
-    this._damage = GameConfig.bullet.damage[idx];
+    this._damage = Math.max(
+      1,
+      Math.round(GameConfig.bullet.damage[idx] * damageMultiplier * (evolution?.damageMultiplier || 1))
+    );
 
     // 计算速度分量（角度转弧度）
     const rad = (angle * Math.PI) / 180;
@@ -143,6 +171,7 @@ export class Bullet extends Component {
    * 获取子弹颜色（HEX 字符串）
    */
   get color(): string {
+    if (this._evolutionTint) return this._evolutionTint;
     const idx = Math.min(this._level, GameConfig.bulletColors.length - 1);
     return GameConfig.bulletColors[idx];
   }
@@ -152,6 +181,40 @@ export class Bullet extends Component {
    */
   get radius(): number {
     return GameConfig.bullet.radius;
+  }
+
+  get behavior(): WeaponBehavior {
+    return this._behavior;
+  }
+
+  get explodeRadius(): number {
+    return this._explodeRadius;
+  }
+
+  get splashMultiplier(): number {
+    return this._splashMultiplier;
+  }
+
+  get remainingPierce(): number {
+    return this._remainingPierce;
+  }
+
+  get chainCount(): number {
+    return this._chainCount;
+  }
+
+  get chainRange(): number {
+    return this._chainRange;
+  }
+
+  get chainMultiplier(): number {
+    return this._chainMultiplier;
+  }
+
+  consumePierce(): boolean {
+    if (this._remainingPierce <= 0) return false;
+    this._remainingPierce--;
+    return this._remainingPierce > 0;
   }
 
   /**
@@ -164,6 +227,14 @@ export class Bullet extends Component {
     this._angle = 90;
     this._speedMult = 1.0;
     this._lastColorLevel = -1;
+    this._behavior = 'normal';
+    this._explodeRadius = 0;
+    this._splashMultiplier = 0;
+    this._remainingPierce = 0;
+    this._chainCount = 0;
+    this._chainRange = 0;
+    this._chainMultiplier = 0;
+    this._evolutionTint = null;
     this.node.setPosition(0, -2000, 0);
   }
 }

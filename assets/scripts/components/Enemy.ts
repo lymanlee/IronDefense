@@ -4,7 +4,7 @@
  */
 
 import { _decorator, Component, Sprite, UIOpacity, Color, SpriteFrame, resources, Node, UITransform, Vec3 } from 'cc';
-import { GameConfig, WaveData } from '../data/GameConfig';
+import { GameConfig, WaveData, EnemyTypeId, EnemyTypeData } from '../data/GameConfig';
 
 const { ccclass, property } = _decorator;
 
@@ -36,9 +36,18 @@ export class Enemy extends Component {
   private _expDrop: number = 0;
   private _waveNum: number = 1;
   private _lane: number = 0;
+  private _enemyType: EnemyTypeId = 'normal';
+  private _enemyTypeData: EnemyTypeData = GameConfig.enemyTypes.normal;
   private _dead: boolean = false;
   private _reachedRail: boolean = false;
   private _attackTimer: number = 0;
+  private _freezeTimer: number = 0;
+  private _spawnTimer: number = 0;
+  private _openingArmorTimer: number = 0;
+  private _speedScale: number = 1;
+  private _speedBoostTimer: number = 0;
+  private _phaseTriggered: boolean = false;
+  private _battleFrozen: boolean = false;
 
   // ==================== 位置 ====================
   private _x: number = 0;
@@ -72,6 +81,7 @@ export class Enemy extends Component {
   private static readonly SHADOW_OFFSET_Y: number = -50;   // 阴影Y偏移
   private static readonly SHADOW_SCALE_Y: number = 0.3;     // 阴影Y轴压扁
   private static readonly SHADOW_ALPHA: number = 60;        // 阴影透明度(0-255)
+  private static readonly SUICIDE_BLINK_THRESHOLD: number = 0.35;
 
   // ==================== 初始化 ====================
 
@@ -102,7 +112,7 @@ export class Enemy extends Component {
     // Sprite 组件（黑色+半透明 = 阴影效果）
     this._shadowSprite = this._shadowNode.addComponent(Sprite);
     this._shadowSprite.type = Sprite.Type.SIMPLE;
-    this._shadowSprite.sizeMode = Sprite.SizeMode.UNIFIED;
+    this._shadowSprite.sizeMode = Sprite.SizeMode.CUSTOM;
     this._shadowSprite.color = new Color(0, 0, 0, 255);
 
     // 透明度
@@ -138,8 +148,10 @@ export class Enemy extends Component {
   /**
    * 初始化敌人
    */
-  init(waveData: WaveData, waveNum: number, col?: number, row?: number, totalCols?: number, totalRows?: number, x?: number): void {
+  init(waveData: WaveData, waveNum: number, col?: number, row?: number, totalCols?: number, totalRows?: number, x?: number, enemyType: EnemyTypeId = 'normal'): void {
     const cfg = GameConfig.bridge;
+    this._enemyType = enemyType;
+    this._enemyTypeData = GameConfig.enemyTypes[enemyType] || GameConfig.enemyTypes.normal;
 
     if (col !== undefined && row !== undefined && totalCols !== undefined && totalRows !== undefined) {
       this._x = x!;
@@ -153,16 +165,22 @@ export class Enemy extends Component {
       this._y = cfg.top + 30 + Math.random() * 40;
     }
 
-    this._maxHp = waveData.hp;
-    this._hp = waveData.hp;
-    this._speed = waveData.speed;
-    this._atk = waveData.atk;
-    this._expDrop = waveData.exp;
+    this._maxHp = Math.max(1, Math.round(waveData.hp * this._enemyTypeData.hpMult));
+    this._hp = this._maxHp;
+    this._speed = Math.max(1, waveData.speed * this._enemyTypeData.speedMult);
+    this._atk = Math.max(1, Math.round(waveData.atk * this._enemyTypeData.atkMult));
+    this._expDrop = Math.max(1, Math.round(waveData.exp * this._enemyTypeData.expMult));
     this._waveNum = waveNum;
 
     this._dead = false;
     this._reachedRail = false;
     this._attackTimer = 0;
+    this._freezeTimer = 0;
+    this._spawnTimer = 0;
+    this._openingArmorTimer = this._enemyTypeData.openingArmorSeconds;
+    this._speedScale = 1;
+    this._speedBoostTimer = 0;
+    this._phaseTriggered = false;
     this._flashTimer = 0;
     this._attackEffectTimer = 0;
     this._deathTimer = 0;
@@ -184,8 +202,9 @@ export class Enemy extends Component {
       this._opacity.opacity = 255;
     }
     if (this._sprite) {
-      this._sprite.color = this._baseColor.clone();
+      this._sprite.color = this._resolveBaseColor();
     }
+    this.node.setScale(this._enemyTypeData.scale, this._enemyTypeData.scale, 1);
   }
 
   private _setFrame(index: number): void {
@@ -203,6 +222,19 @@ export class Enemy extends Component {
   // ==================== 每帧更新 ====================
 
   update(dt: number): void {
+    if (this._battleFrozen) return;
+    this._spawnTimer += dt;
+    if (this._openingArmorTimer > 0) {
+      this._openingArmorTimer = Math.max(0, this._openingArmorTimer - dt);
+    }
+    if (this._speedBoostTimer > 0) {
+      this._speedBoostTimer = Math.max(0, this._speedBoostTimer - dt);
+      if (this._speedBoostTimer <= 0) {
+        this._speedBoostTimer = 0;
+        this._speedScale = 1;
+      }
+    }
+
     // 帧动画更新
     if (!this._dead && this._frames.length > 0) {
       this._frameTimer += dt;
@@ -222,6 +254,10 @@ export class Enemy extends Component {
     this._updateAttackEffect(dt);
 
     if (this._reachedRail) return;
+    if (this._freezeTimer > 0) {
+      this._freezeTimer = Math.max(0, this._freezeTimer - dt);
+      return;
+    }
 
     this._updateMovement(dt);
   }
@@ -233,7 +269,7 @@ export class Enemy extends Component {
     if (this._flashTimer <= 0) {
       // 恢复正常颜色
       if (this._sprite) {
-        this._sprite.color = this._baseColor.clone();
+        this._sprite.color = this._resolveBaseColor();
       }
       return;
     }
@@ -292,7 +328,7 @@ export class Enemy extends Component {
   }
 
   private _updateMovement(dt: number): void {
-    this._y -= this._speed * dt;
+    this._y -= this._speed * this._speedScale * dt;
     this.node.setPosition(this._x, this._y, 0);
 
     if (this._y <= GameConfig.bridge.railY + 10) {
@@ -305,7 +341,14 @@ export class Enemy extends Component {
   // ==================== 受击 ====================
 
   takeDamage(dmg: number): void {
-    this._hp -= dmg;
+    let actualDamage = dmg;
+    if (this._openingArmorTimer > 0) {
+      actualDamage *= 1 - this._enemyTypeData.openingArmorReduce;
+    }
+    if (this._enemyTypeData.damageReduce > 0) {
+      actualDamage *= 1 - this._enemyTypeData.damageReduce;
+    }
+    this._hp -= Math.max(1, Math.round(actualDamage));
     this._flashTimer = this._flashDuration;
     if (this._hp <= 0) {
       this._hp = 0;
@@ -313,12 +356,58 @@ export class Enemy extends Component {
     }
   }
 
+  heal(amount: number): void {
+    if (this._dead || amount <= 0) return;
+    this._hp = Math.min(this._maxHp, this._hp + amount);
+    this._flashTimer = this._flashDuration * 0.4;
+  }
+
+  /**
+   * 临时冻结移动
+   */
+  freeze(seconds: number): void {
+    if (this._dead || seconds <= 0) return;
+    this._freezeTimer = Math.max(this._freezeTimer, seconds);
+  }
+
+  /**
+   * 将敌人从护栏处推回
+   */
+  pushBack(distance: number): void {
+    if (this._dead || distance <= 0) return;
+    this._y = Math.min(GameConfig.bridge.top + 120, this._y + distance);
+    this._reachedRail = false;
+    this.node.setPosition(this._x, this._y, 0);
+  }
+
+  setWorldPosition(x: number, y: number): void {
+    this._x = x;
+    this._y = y;
+    this._reachedRail = y <= GameConfig.bridge.railY + 10;
+    this.node.setPosition(this._x, this._y, 0);
+  }
+
+  applySpeedBoost(multiplier: number, seconds: number): void {
+    if (this._dead || multiplier <= 1 || seconds <= 0) return;
+    this._speedScale = Math.max(this._speedScale, multiplier);
+    this._speedBoostTimer = Math.max(this._speedBoostTimer, seconds);
+  }
+
   // ==================== 攻击 ====================
 
   tryAttack(): boolean {
     if (!this._reachedRail || this._dead) return false;
     this._attackTimer += 1 / 60;
-    if (this._attackTimer >= 1 / GameConfig.enemy.attackRate) {
+    if (this._enemyType === 'suicide') {
+      if (this._attackTimer >= this.explodeDelay) {
+        this._dead = true;
+        this._triggerAttackEffect();
+        return true;
+      }
+      return false;
+    }
+    const attackRate = GameConfig.enemy.attackRate * this._enemyTypeData.attackRateMult;
+    if (this._attackTimer >= 1 / attackRate) {
       this._attackTimer = 0;
       this._triggerAttackEffect();
       return true;
@@ -328,6 +417,24 @@ export class Enemy extends Component {
 
   private _triggerAttackEffect(): void {
     this._attackEffectTimer = this._attackEffectDuration;
+    if (this._enemyType === 'suicide' && this._sprite) {
+      this._sprite.color = new Color(255, 244, 214, 255);
+    }
+  }
+
+  private _resolveBaseColor(): Color {
+    const color = this._baseColor.clone();
+    if (!this._enemyTypeData.tint) {
+      return color;
+    }
+    const tint = new Color();
+    tint.fromHEX(this._enemyTypeData.tint);
+    return new Color(
+      Math.floor((color.r + tint.r) / 2),
+      Math.floor((color.g + tint.g) / 2),
+      Math.floor((color.b + tint.b) / 2),
+      255
+    );
   }
 
   // ==================== Getters ====================
@@ -341,12 +448,43 @@ export class Enemy extends Component {
   get waveNum(): number { return this._waveNum; }
   get x(): number { return this._x; }
   get y(): number { return this._y; }
+  get frozen(): boolean { return this._freezeTimer > 0; }
+  get enemyType(): EnemyTypeId { return this._enemyType; }
+  get rewardCoins(): number { return this._enemyTypeData.rewardCoins; }
+  get rewardParts(): number { return this._enemyTypeData.rewardParts; }
+  get isBoss(): boolean { return this._enemyType.startsWith('boss_'); }
+  get isSuicide(): boolean { return this._enemyType === 'suicide'; }
+  get isHealer(): boolean { return this._enemyType === 'healer'; }
+  get openingArmorActive(): boolean { return this._openingArmorTimer > 0; }
+  get explodeDelay(): number { return this._enemyTypeData.explodeDelay || 0; }
+  get spawnTime(): number { return this._spawnTimer; }
+  get healPercent(): number { return this._enemyTypeData.healPercent || 0; }
+  get healInterval(): number { return this._enemyTypeData.healInterval || 0; }
+  get healRange(): number { return this._enemyTypeData.healRange || 0; }
+  get phaseTriggered(): boolean { return this._phaseTriggered; }
+  get hpRatio(): number { return this._maxHp > 0 ? this._hp / this._maxHp : 0; }
+
+  markPhaseTriggered(): void {
+    this._phaseTriggered = true;
+  }
+
+  setBattleFrozen(value: boolean): void {
+    this._battleFrozen = value;
+  }
 
   // ==================== 重置 ====================
 
   reset(): void {
     this._dead = true;
     this._reachedRail = false;
+    this._freezeTimer = 0;
+    this._spawnTimer = 0;
+    this._openingArmorTimer = 0;
+    this._speedScale = 1;
+    this._speedBoostTimer = 0;
+    this._phaseTriggered = false;
+    this._battleFrozen = false;
     this.node.setPosition(0, -2000, 0);
+    this.node.setScale(1, 1, 1);
   }
 }
