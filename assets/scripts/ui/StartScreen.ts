@@ -12,6 +12,18 @@ export interface DebugSettings {
   level: number;
 }
 
+export interface StartStageDisplayData {
+  eyebrow: string;
+  code: string;
+  name: string;
+  waveText: string;
+  rewardText: string;
+  partsText: string;
+  hintText: string;
+  canPrev: boolean;
+  canNext: boolean;
+}
+
 @ccclass('StartScreen')
 export class StartScreen extends Component {
   // 回调
@@ -29,6 +41,24 @@ export class StartScreen extends Component {
 
   @property(Label)
   stageMetaLabel: Label | null = null;
+
+  @property(Label)
+  stageCodeLabel: Label | null = null;
+
+  @property(Label)
+  stageNameLabel: Label | null = null;
+
+  @property(Label)
+  stageHintLabel: Label | null = null;
+
+  @property(Label)
+  stageWaveLabel: Label | null = null;
+
+  @property(Label)
+  stageRewardLabel: Label | null = null;
+
+  @property(Label)
+  stagePartsLabel: Label | null = null;
 
   @property(Button)
   prevStageButton: Button | null = null;
@@ -62,30 +92,63 @@ export class StartScreen extends Component {
     this._onNextStage = callback;
   }
 
-  updateStageInfo(title: string, value: string, meta: string, canPrev: boolean, canNext: boolean): void {
+  updateStageInfo(data: StartStageDisplayData): void {
     this._ensureStageRefs();
-    if (this.stageTitleLabel) this.stageTitleLabel.string = title;
-    if (this.stageValueLabel) this.stageValueLabel.string = value;
-    if (this.stageMetaLabel) this.stageMetaLabel.string = meta;
-    if (this.prevStageButton) this.prevStageButton.interactable = canPrev;
-    if (this.nextStageButton) this.nextStageButton.interactable = canNext;
+    if (this.stageTitleLabel) this.stageTitleLabel.string = data.eyebrow;
+    if (this.stageCodeLabel) this.stageCodeLabel.string = data.code;
+    if (this.stageNameLabel) this.stageNameLabel.string = data.name;
+    if (this.stageWaveLabel) this.stageWaveLabel.string = data.waveText;
+    if (this.stageRewardLabel) this.stageRewardLabel.string = data.rewardText;
+    if (this.stagePartsLabel) this.stagePartsLabel.string = data.partsText;
+    if (this.stageHintLabel) this.stageHintLabel.string = data.hintText;
+
+    // Fallback for older scene layouts before the richer stage card nodes exist.
+    if (this.stageValueLabel && !this.stageCodeLabel && !this.stageNameLabel) {
+      this.stageValueLabel.string = `${data.code} ${data.name}`;
+    }
+    if (this.stageMetaLabel && !this.stageWaveLabel && !this.stageRewardLabel && !this.stagePartsLabel && !this.stageHintLabel) {
+      const parts = data.partsText ? ` · ${data.partsText}` : '';
+      this.stageMetaLabel.string = `${data.waveText} · ${data.rewardText}${parts}`;
+    }
+
+    if (this.prevStageButton) this.prevStageButton.interactable = data.canPrev;
+    if (this.nextStageButton) this.nextStageButton.interactable = data.canNext;
   }
 
   private _ensureStageRefs(): void {
+    const stageCard = this.node.getChildByName('StageCard');
     if (!this.stageTitleLabel) {
-      this.stageTitleLabel = this.node.getChildByName('StageTitleLabel')?.getComponent(Label) || null;
+      this.stageTitleLabel = stageCard?.getChildByName('StageTitleLabel')?.getComponent(Label) || null;
     }
     if (!this.stageValueLabel) {
-      this.stageValueLabel = this.node.getChildByName('StageValueLabel')?.getComponent(Label) || null;
+      this.stageValueLabel = stageCard?.getChildByName('StageValueLabel')?.getComponent(Label) || null;
     }
     if (!this.stageMetaLabel) {
-      this.stageMetaLabel = this.node.getChildByName('StageMetaLabel')?.getComponent(Label) || null;
+      this.stageMetaLabel = stageCard?.getChildByName('StageMetaLabel')?.getComponent(Label) || null;
+    }
+    if (!this.stageCodeLabel) {
+      this.stageCodeLabel = stageCard?.getChildByName('StageCodeLabel')?.getComponent(Label) || null;
+    }
+    if (!this.stageNameLabel) {
+      this.stageNameLabel = stageCard?.getChildByName('StageNameLabel')?.getComponent(Label) || null;
+    }
+    if (!this.stageHintLabel) {
+      this.stageHintLabel = stageCard?.getChildByName('StageHintLabel')?.getComponent(Label) || null;
+    }
+    if (!this.stageWaveLabel) {
+      this.stageWaveLabel = stageCard?.getChildByName('WaveBadgeLabel')?.getComponent(Label) || null;
+    }
+    if (!this.stageRewardLabel) {
+      this.stageRewardLabel = stageCard?.getChildByName('RewardBadgeLabel')?.getComponent(Label) || null;
+    }
+    if (!this.stagePartsLabel) {
+      this.stagePartsLabel = stageCard?.getChildByName('PartsBadgeLabel')?.getComponent(Label) || null;
     }
     if (!this.prevStageButton) {
-      this.prevStageButton = this.node.getChildByName('PrevStageButton')?.getComponent(Button) || null;
+      this.prevStageButton = stageCard?.getChildByName('PrevStageButton')?.getComponent(Button) || null;
     }
     if (!this.nextStageButton) {
-      this.nextStageButton = this.node.getChildByName('NextStageButton')?.getComponent(Button) || null;
+      this.nextStageButton = stageCard?.getChildByName('NextStageButton')?.getComponent(Button) || null;
     }
   }
 

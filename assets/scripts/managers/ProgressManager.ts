@@ -21,6 +21,7 @@ export interface PermanentUpgradeState {
 export interface PermanentBonusSummary {
   carHpFlat: number;
   carDamageMultiplier: number;
+  baseWeaponTier: number;
   startingCoins: number;
   reviveHpBonusRatio: number;
   reviveShieldSeconds: number;
@@ -163,6 +164,17 @@ export class ProgressManager {
     return true;
   }
 
+  resetAll(): void {
+    this._data = {
+      coins: 0,
+      parts: 0,
+      upgrades: {},
+      currentStageIndex: 0,
+      unlockedStageIndex: 0,
+    };
+    this._save();
+  }
+
   getAllUpgradeStates(): Array<PermanentUpgradeConfig & PermanentUpgradeState> {
     return ProgressManager._upgradeDefs.map(def => ({
       ...def,
@@ -173,6 +185,7 @@ export class ProgressManager {
   getPermanentBonuses(): PermanentBonusSummary {
     const hp = this.getUpgradeState('car_hp');
     const atk = this.getUpgradeState('car_attack');
+    const weaponTier = this.getUpgradeState('weapon_tier');
     const startCoins = this.getUpgradeState('starting_coins');
     const revive = this.getUpgradeState('revive_bonus');
     const supply = this.getUpgradeState('supply_quality');
@@ -181,6 +194,7 @@ export class ProgressManager {
     return {
       carHpFlat: Math.round(hp.value),
       carDamageMultiplier: 1 + atk.value,
+      baseWeaponTier: Math.max(1, Math.round(weaponTier.value)),
       startingCoins: Math.round(startCoins.value),
       reviveHpBonusRatio: revive.value,
       reviveShieldSeconds: revive.extraValue,

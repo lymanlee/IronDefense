@@ -11,8 +11,11 @@ const { ccclass } = _decorator;
 export class SupplyChest extends Component {
   private _type: SupplyChestType = 'firepower';
   private _quality: SupplyChestQuality = 'normal';
+  private _serial: number = 0;
   private _x: number = 0;
   private _y: number = 0;
+  private _targetX: number = 0;
+  private _targetY: number = 0;
   private _radius: number = 30;
   private _hp: number = 1;
   private _maxHp: number = 1;
@@ -38,7 +41,7 @@ export class SupplyChest extends Component {
 
     const titleNode = new Node('ChestTitle');
     const titleTransform = titleNode.addComponent(UITransform);
-    titleTransform.setContentSize(180, 32);
+    titleTransform.setContentSize(240, 36);
     titleNode.setPosition(0, 8, 0);
     this._label = titleNode.addComponent(Label);
     this._label.fontSize = 22;
@@ -49,7 +52,7 @@ export class SupplyChest extends Component {
 
     const hpNode = new Node('ChestHp');
     const hpTransform = hpNode.addComponent(UITransform);
-    hpTransform.setContentSize(180, 24);
+    hpTransform.setContentSize(240, 28);
     hpNode.setPosition(0, -18, 0);
     this._hpLabel = hpNode.addComponent(Label);
     this._hpLabel.fontSize = 16;
@@ -66,6 +69,7 @@ export class SupplyChest extends Component {
     y: number,
     hp: number,
     radius: number,
+    serial: number,
     speed: number,
     atk: number,
     attackRate: number
@@ -74,7 +78,10 @@ export class SupplyChest extends Component {
     this._quality = quality;
     this._x = x;
     this._y = y;
+    this._targetX = x;
+    this._targetY = y;
     this._radius = radius;
+    this._serial = Math.max(0, Math.floor(serial));
     this._hp = Math.max(1, Math.round(hp));
     this._maxHp = this._hp;
     this._dead = false;
@@ -105,10 +112,13 @@ export class SupplyChest extends Component {
       this._refreshView();
       return;
     }
-    if (!this._reachedRail) {
-      this._y -= this._speed * dt;
-      if (this._y <= -510) {
-        this._y = -510;
+    if (this._x !== this._targetX) {
+      this._x = this._targetX;
+    }
+    if (this._y > this._targetY) {
+      this._y = Math.max(this._targetY, this._y - this._speed * dt);
+      if (this._y <= this._targetY + 0.5) {
+        this._y = this._targetY;
         this._reachedRail = true;
       }
       this.node.setPosition(this._x, this._y, 0);
@@ -149,6 +159,22 @@ export class SupplyChest extends Component {
 
   setBattleFrozen(value: boolean): void {
     this._battleFrozen = value;
+  }
+
+  setTrackTarget(x: number, y: number): void {
+    this._targetX = x;
+    this._targetY = y;
+    this._reachedRail = this._y <= y;
+  }
+
+  setPositionInstant(x: number, y: number, reachedRail: boolean = false): void {
+    this._x = x;
+    this._y = y;
+    this._targetX = x;
+    this._targetY = y;
+    this._reachedRail = reachedRail;
+    this.node.setPosition(x, y, 0);
+    this._refreshView();
   }
 
   tryAttack(dt: number): boolean {
@@ -204,10 +230,10 @@ export class SupplyChest extends Component {
   private _getTitle(): string {
     const typeLabel: Record<SupplyChestType, string> = {
       firepower: '火力箱',
-      survival: '生存箱',
       control: '控制箱',
-      resource: '资源箱',
       rare: '稀有箱',
+      survival: '火力箱',
+      resource: '控制箱',
     };
     const qualityLabel: Record<SupplyChestQuality, string> = {
       normal: '普通',
@@ -220,10 +246,10 @@ export class SupplyChest extends Component {
   private _getBodyColor(): Color {
     const colors: Record<SupplyChestType, Color> = {
       firepower: new Color(129, 47, 28),
-      survival: new Color(41, 96, 68),
       control: new Color(55, 73, 148),
-      resource: new Color(112, 84, 24),
       rare: new Color(92, 52, 122),
+      survival: new Color(129, 47, 28),
+      resource: new Color(55, 73, 148),
     };
     return colors[this._type].clone();
   }
@@ -275,5 +301,9 @@ export class SupplyChest extends Component {
 
   get atk(): number {
     return this._atk;
+  }
+
+  get serial(): number {
+    return this._serial;
   }
 }

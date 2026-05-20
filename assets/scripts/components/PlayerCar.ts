@@ -1,11 +1,11 @@
 /**
  * PlayerCar.ts - 武装车组件
- * 控制武装车的移动、射击和武器等级
+ * 控制武装车的移动、射击和基础武器档位表现
  */
 
 import { _decorator, Component, Node, Sprite, SpriteFrame, resources, UITransform } from 'cc';
 import { GameConfig } from '../data/GameConfig';
-import { ExpSystem } from './ExpSystem';
+import { WeaponTierSystem } from './WeaponTierSystem';
 import { Enemy } from './Enemy';
 
 const { ccclass, property } = _decorator;
@@ -18,6 +18,8 @@ export interface AttackTarget {
 
 @ccclass('PlayerCar')
 export class PlayerCar extends Component {
+  private static readonly BURST_INTERVAL: number = 0.045;
+
   // 位置
   private _x: number = 0;
   private _y: number = 0;
@@ -29,13 +31,17 @@ export class PlayerCar extends Component {
   private _dead: boolean = false;
   private _invulnerableTimer: number = 0;
 
-  // 经验系统引用
-  private _expSystem: ExpSystem | null = null;
+  // 基础武器档位系统引用
+  private _weaponTierSystem: WeaponTierSystem | null = null;
 
   // 射击
   private _fireTimer: number = 0;
   private _fireRateMultiplier: number = 1;
   private _damageMultiplier: number = 1;
+  private _bonusMultiShot: number = 0;
+  private _bonusSpreadCount: number = 0;
+  private _burstQueue: Array<{ angle: number; speedMult: number }> = [];
+  private _burstTimer: number = 0;
 
   // 控制
   private static readonly TOUCH_SENSITIVITY: number = 0.6; // 手指速度 → 坦克速度的倍率
@@ -48,7 +54,7 @@ export class PlayerCar extends Component {
   private _keyRight: boolean = false;
 
   // 射击回调（新增 angle 和 speedMult 参数）
-  private _onFire: ((x: number, y: number, level: number, angle: number, speedMult: number) => void) | null = null;
+  private _onFire: ((x: number, y: number, tierIndex: number, angle: number, speedMult: number) => void) | null = null;
   private _onShoot: (() => void) | null = null;
 
   // 序列帧动画
@@ -114,16 +120,16 @@ export class PlayerCar extends Component {
   }
 
   /**
-   * 设置经验系统引用
+   * 设置基础武器档位系统引用
    */
-  setExpSystem(expSystem: ExpSystem): void {
-    this._expSystem = expSystem;
+  setWeaponTierSystem(weaponTierSystem: WeaponTierSystem): void {
+    this._weaponTierSystem = weaponTierSystem;
   }
 
   /**
    * 设置射击回调
    */
-  setOnFire(callback: (x: number, y: number, level: number, angle: number, speedMult: number) => void): void {
+  setOnFire(callback: (x: number, y: number, tierIndex: number, angle: number, speedMult: number) => void): void {
     this._onFire = callback;
   }
 
@@ -143,6 +149,8 @@ export class PlayerCar extends Component {
     if (this._invulnerableTimer > 0) {
       this._invulnerableTimer = Math.max(0, this._invulnerableTimer - dt);
     }
+
+    this._updateBurstQueue(dt);
 
     const { width } = GameConfig.canvas;
     const { left, right } = GameConfig.bridge;
@@ -222,7 +230,7 @@ export class PlayerCar extends Component {
    * 尝试射击（按角度扇形发射）
    */
   tryFire(targets: AttackTarget[], dt: number): void {
-    if (this._dead || !this._expSystem) return;
+    if (this._dead || !this._weaponTierSystem) return;
 
     // 没有可用目标时不累加计时器
     const target = this._findTarget(targets);
@@ -232,7 +240,7 @@ export class PlayerCar extends Component {
     }
 
     this._fireTimer += dt;
-    const rate = this._expSystem.fireRate * this._fireRateMultiplier;
+    const rate = this._weaponTierSystem.fireRate * this._fireRateMultiplier;
 
     if (this._fireTimer < 1 / rate) return;
 
@@ -241,32 +249,33 @@ export class PlayerCar extends Component {
     if (this._fireTimer < 0) this._fireTimer = 0;
 
     // 获取发射模式配置
-    const pattern = this._expSystem.firePattern;
+    const pattern = this._weaponTierSystem.firePattern;
     const baseAngle = 90; // 基准角度：垂直向上
     const count = pattern.count;
-    const spread = pattern.spread;
-    const multiShot = pattern.multiShot;
+    const multiShot = pattern.multiShot + this._bonusMultiShot;
     const speedMults = pattern.speedMults;
+    const finalCount = count + this._bonusSpreadCount;
+    const spread = this._resolveSpreadAngle(finalCount, pattern.spread);
 
     // 计算角度列表（以90°为中心对称分布）
-    const totalSpread = (count - 1) * spread;
+    const totalSpread = (finalCount - 1) * spread;
     const startAngle = baseAngle - totalSpread / 2;
 
     const angles: number[] = [];
-    for (let i = 0; i < count; i++) {
+    for (let i = 0; i < finalCount; i++) {
       angles.push(startAngle + i * spread);
     }
 
-    // 发射子弹
-    if (this._onFire) {
+    this._burstQueue = [];
+    for (let m = 0; m < multiShot; m++) {
       for (const angle of angles) {
-        // 每个方向连发 multiShot 次，速度差异化
-        for (let m = 0; m < multiShot; m++) {
-          const speedMult = speedMults[m] ?? 1.0;
-          this._onFire(this._x, this._y + GameConfig.car.height / 2, this._expSystem!.levelIndex, angle, speedMult);
-        }
+        const speedBase = speedMults[m] ?? 1.0;
+        const speedMult = Math.max(0.82, speedBase - m * 0.03);
+        this._burstQueue.push({ angle, speedMult });
       }
     }
+    this._fireBurstShot();
+    this._burstTimer = PlayerCar.BURST_INTERVAL;
 
     if (this._onShoot) {
       this._onShoot();
@@ -274,6 +283,51 @@ export class PlayerCar extends Component {
 
     // 触发开火动画
     this._playFireAnim();
+  }
+
+  /**
+   * 根据最终并发数解析实际夹角。
+   * 优先映射到 weaponBase 中已配置的并发档位，保证“并发+1”后的手感与配置表一致。
+   */
+  private _resolveSpreadAngle(finalCount: number, fallbackSpread: number): number {
+    if (finalCount <= 1) return 0;
+
+    const profileCounts = GameConfig.weaponBase.baseSpreadCount || [];
+    const profileAngles = GameConfig.weaponBase.spreadAngle || [];
+
+    const exactIdx = profileCounts.findIndex(count => count === finalCount);
+    if (exactIdx >= 0) {
+      return Math.max(0, profileAngles[exactIdx] || fallbackSpread || 0);
+    }
+
+    const nextIdx = profileCounts.findIndex(count => count > finalCount);
+    if (nextIdx >= 0) {
+      return Math.max(0, profileAngles[nextIdx] || fallbackSpread || 0);
+    }
+
+    const maxConfiguredCount = profileCounts[profileCounts.length - 1] || 1;
+    const maxConfiguredAngle = profileAngles[profileAngles.length - 1] || fallbackSpread || 0;
+    const overflowCount = Math.max(0, finalCount - maxConfiguredCount);
+    return maxConfiguredAngle + overflowCount * 1.2;
+  }
+
+  private _updateBurstQueue(dt: number): void {
+    if (this._burstQueue.length === 0) return;
+    this._burstTimer -= dt;
+    if (this._burstTimer > 0) return;
+    this._fireBurstShot();
+    if (this._burstQueue.length > 0) {
+      this._burstTimer = PlayerCar.BURST_INTERVAL;
+      this._playFireAnim();
+    }
+  }
+
+  private _fireBurstShot(): void {
+    if (!this._onFire || !this._weaponTierSystem) return;
+    const remaining = this._burstQueue.splice(0, Math.max(1, this._weaponTierSystem.firePattern.count + this._bonusSpreadCount));
+    for (const shot of remaining) {
+      this._onFire(this._x, this._y + GameConfig.car.height / 2, this._weaponTierSystem.tierIndex, shot.angle, shot.speedMult);
+    }
   }
 
   /**
@@ -356,6 +410,11 @@ export class PlayerCar extends Component {
     this._damageMultiplier = Math.max(0.5, damageMultiplier);
   }
 
+  setRunFirePatternBonus(multiShotAdd: number, spreadCountAdd: number): void {
+    this._bonusMultiShot = Math.max(0, Math.floor(multiShotAdd));
+    this._bonusSpreadCount = Math.max(0, Math.floor(spreadCountAdd));
+  }
+
   /**
    * 重置射击计时器
    */
@@ -427,6 +486,10 @@ export class PlayerCar extends Component {
     this._invulnerableTimer = 0;
     this._fireTimer = 0;
     this._fireRateMultiplier = 1;
+    this._bonusMultiShot = 0;
+    this._bonusSpreadCount = 0;
+    this._burstQueue = [];
+    this._burstTimer = 0;
     this._dragging = false;
     this._lastTouchX = 0;
     this._lastTouchMoveTime = 0;

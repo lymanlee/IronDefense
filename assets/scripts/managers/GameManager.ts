@@ -3,9 +3,9 @@
  * 协调所有游戏系统，主循环，状态机
  */
 
-import { _decorator, Component, Node, instantiate, Prefab, tween, Vec3, Color, Tween, input, Input, KeyCode, director, Sprite, UIOpacity, UITransform, SpriteFrame, Graphics, Label, Button, BlockInputEvents } from 'cc';
+import { _decorator, Component, Node, instantiate, Prefab, tween, Vec3, Color, Tween, input, Input, KeyCode, director, Sprite, UIOpacity, UITransform, SpriteFrame, Graphics, Label, Button, BlockInputEvents, resources } from 'cc';
 import { GameConfig, PermanentUpgradeId, SupplyChestConfigData, SupplyChestQuality, SupplyChestType, SupplyMode, SupplyOptionData, WaveDefinitionData, WeaponEvolutionData, WeaponEvolutionId } from '../data/GameConfig';
-import { ExpSystem } from '../components/ExpSystem';
+import { WeaponTierSystem } from '../components/WeaponTierSystem';
 import { AttackTarget, PlayerCar } from '../components/PlayerCar';
 import { Enemy } from '../components/Enemy';
 import { Bullet } from '../components/Bullet';
@@ -25,6 +25,13 @@ import { GarageScreen } from '../ui/GarageScreen';
 const { ccclass, property } = _decorator;
 
 type GameState = 'start' | 'debug' | 'playing' | 'gameover' | 'victory' | 'revive' | 'supply' | 'ad';
+
+type ChestPhase = 'early' | 'mid' | 'late';
+
+interface ChestSlotData {
+  x: number;
+  y: number;
+}
 
 @ccclass('GameManager')
 export class GameManager extends Component {
@@ -58,10 +65,10 @@ export class GameManager extends Component {
   // 游戏状态
   private _state: GameState = 'start';
   private _debugWave: number = 1;
-  private _debugLevel: number = 1;
+  private _debugTier: number = 1;
 
   // 系统
-  private _expSystem: ExpSystem | null = null;
+  private _weaponTierSystem: WeaponTierSystem | null = null;
   private _waveManager: WaveManager | null = null;
   private _audioManager: AudioManager | null = null;
   private _playerCar: PlayerCar | null = null;
@@ -122,25 +129,37 @@ export class GameManager extends Component {
   private _gameLayerNode: Node | null = null;
   private _revivePanelNode: Node | null = null;
   private _supplyPanelNode: Node | null = null;
+  private _supplyPanelTitleLabel: Label | null = null;
+  private _supplyPanelHintLabel: Label | null = null;
+  private _supplyPanelSubTitleLabel: Label | null = null;
+  private _supplyPanelStatusLabel: Label | null = null;
+  private _supplyPanelAdButton: Node | null = null;
   private _waveBannerNode: Node | null = null;
   private _waveSupportTimers: Map<string, number> = new Map();
-  private _supplyChest: SupplyChest | null = null;
-  private _supplyChestNode: Node | null = null;
+  private _supplyChests: SupplyChest[] = [];
   private _chestSpawnTimer: number = 0;
   private _chestSpawnDelay: number = 0;
   private _chestSelectionsThisRun: number = 0;
-  private _lastChestWaveSpawned: number = 0;
+  private _chestSpawnSerial: number = 0;
+  private _chestSlots: ChestSlotData[] = [];
+  private _chestTrackX: number = 0;
   private _battleFrozen: boolean = false;
   private _stageVictoryPending: boolean = false;
   private _currentStageIndex: number = 0;
   private _completedStageIndex: number = 0;
+  private _bonusMultiShot: number = 0;
+  private _bonusSpreadCount: number = 0;
+  private _bonusExplodeRadiusMultiplier: number = 1;
+  private _bonusPierceCount: number = 0;
+  private _bonusChainCount: number = 0;
+  private _bonusChainRangeMultiplier: number = 1;
 
   // 触控
   private _touchStartX: number = 0;
 
   onLoad(): void {
     // 初始化系统
-    this._expSystem = new ExpSystem();
+    this._weaponTierSystem = new WeaponTierSystem();
     this._waveManager = new WaveManager();
     // AudioManager 现在是场景组件，通过 find 获取
     this._audioManager = this.node.getComponent(AudioManager);
@@ -155,6 +174,7 @@ export class GameManager extends Component {
 
     // 设置波次管理器工厂
     if (this._waveManager && this._enemyPool) {
+      this._waveManager.setDensityProvider((waveIndex) => this._getStageEnemyDensityMultiplier(waveIndex));
       this._waveManager.setEnemyFactory(() => {
         const enemy = this._enemyPool!.get();
         if (enemy) {
@@ -171,8 +191,8 @@ export class GameManager extends Component {
     if (this.playerCarNode) {
       this._playerCar = this.playerCarNode.getComponent(PlayerCar);
       if (this._playerCar) {
-        this._playerCar.setExpSystem(this._expSystem);
-        this._playerCar.setOnFire((x, y, level, angle, speedMult) => this._fireBullet(x, y, level, angle, speedMult));
+        this._playerCar.setWeaponTierSystem(this._weaponTierSystem);
+        this._playerCar.setOnFire((x, y, tierIndex, angle, speedMult) => this._fireBullet(x, y, tierIndex, angle, speedMult));
         this._playerCar.setOnShoot(() => this._audioManager?.shoot());
       }
     }
@@ -216,13 +236,17 @@ export class GameManager extends Component {
         this._debugScreenNode.active = false;
         this._debugScreen = this._debugScreenNode.getComponent(DebugScreen);
         if (this._debugScreen) {
-          this._debugScreen.setOnConfirm((wave, level, evolution) => {
-            console.log('[GameManager] 调试模式开始，波次:', wave, '等级:', level, '分支:', evolution);
-            this.startGame(wave, level, evolution);
+          this._debugScreen.setOnConfirm((wave, tier, evolution) => {
+            console.log('[GameManager] 调试模式开始，波次:', wave, '武器档位:', tier, '分支:', evolution);
+            this.startGame(wave, tier, evolution);
           });
           this._debugScreen.setOnBack(() => {
             console.log('[GameManager] 返回开始界面');
             this._hideDebugScreen();
+          });
+          this._debugScreen.setOnResetProgress(() => {
+            console.log('[GameManager] 清空车库存档');
+            this._resetGarageProgress();
           });
         }
       }
@@ -264,6 +288,8 @@ export class GameManager extends Component {
         }
         gameOverNode.active = false;
       }
+
+      this._cacheSupplyPanelRefs(overlayNode);
 
       // HUD
       const hudNode = canvas?.getChildByName('HUD') || null;
@@ -390,7 +416,7 @@ export class GameManager extends Component {
   }
 
   private _updatePlaying(dt: number): void {
-    if (!this._waveManager || !this._playerCar || !this._expSystem) return;
+    if (!this._waveManager || !this._playerCar || !this._weaponTierSystem) return;
     const supplyMode = this._getSupplyMode();
 
     // 更新屏幕闪红效果
@@ -408,9 +434,8 @@ export class GameManager extends Component {
 
     // 更新敌人
     const enemies = this._waveManager.activeEnemies;
-    const chest = this._supplyChest;
     if (!this._battleFrozen) {
-      chest?.updateChest(dt);
+      this._supplyChests.forEach(activeChest => activeChest.updateChest(dt));
       this._updateChestSpawn(dt, enemies);
       enemies.forEach(e => e.update(dt));
       this._applyPendingWaveOpeningEffects(enemies);
@@ -434,26 +459,19 @@ export class GameManager extends Component {
       });
     }
 
-    if (!this._battleFrozen && chest && !chest.dead && chest.reachedRail && chest.tryAttack(dt)) {
-      this._playerCar.takeDamage(chest.atk);
-      this._audioManager?.alarm();
-      this.triggerDamageFlash();
-      this._showFloatingNotice(chest.x, chest.y + 40, '宝箱冲撞', new Color(255, 210, 150));
-    }
-
     // 检查玩家死亡
     if (this._playerCar.dead) {
       this._handlePlayerDeath();
       return;
     }
 
-    if (this._stageVictoryPending && enemies.length === 0 && (!chest || chest.dead)) {
+    if (this._stageVictoryPending && enemies.length === 0 && this._getActiveSupplyChests().length === 0) {
       this._enterVictory();
       return;
     }
 
     // 更新 HUD
-    if (this._hud && this._expSystem && this._waveManager) {
+    if (this._hud && this._weaponTierSystem && this._waveManager) {
       this._hud.updateHUD(
         this._getStageDisplayLabel(),
         this._getStageWaveNum(),
@@ -486,6 +504,22 @@ export class GameManager extends Component {
     const targets = this._buildAttackTargets(enemies);
     this._playerCar.tryFire(targets, dt);
 
+    // 同步 _enemies 数组用于碰撞检测
+    this._enemies = enemies;
+
+    // 先检测一次碰撞，避免护栏前近距离目标被高速子弹跨帧穿透
+    this._checkCollisions();
+
+    // 更新子弹位置
+    this._bullets.forEach(b => {
+      if (!b.dead) {
+        b.tickMove(dt);
+      }
+    });
+
+    // 再检测一次碰撞，覆盖正常飞行过程中的命中
+    this._checkCollisions();
+
     // 回收死亡子弹到对象池（swap-and-pop，零分配）
     for (let i = this._bullets.length - 1; i >= 0; i--) {
       if (this._bullets[i].dead) {
@@ -498,20 +532,13 @@ export class GameManager extends Component {
         this._bullets.pop();
       }
     }
-    // 更新子弹位置
-    this._bullets.forEach(b => b.tickMove(dt));
-
-    // 同步 _enemies 数组用于碰撞检测
-    this._enemies = enemies;
-
-    // 碰撞检测
-    this._checkCollisions();
 
     // 更新爆炸
     this._updateExplosions(dt);
     this._updatePulses(dt);
     this._updateTrails(dt);
     this._updateLightnings(dt);
+    this._refreshEnemyRenderOrder();
 
     // 清理死亡敌人并回收到对象池（节点保留在父节点下，通过 active 控制显隐）
     const removedEnemies = this._waveManager.cleanupEnemies(dt);
@@ -550,36 +577,72 @@ export class GameManager extends Component {
   }
 
   private _checkCollisions(): void {
-    if (!this._expSystem) return;
+    if (!this._weaponTierSystem) return;
     const eCfg = GameConfig.enemy;
     const bCfg = GameConfig.bullet;
+    const collisionEnemies = this._enemies.filter(enemy => !enemy.dead);
 
     this._bullets.forEach(b => {
       if (b.dead) return;
 
-      if (this._supplyChest && !this._supplyChest.dead) {
-        const chestDx = b.x - this._supplyChest.x;
-        const chestDy = b.y - this._supplyChest.y;
-        const chestThreshold = this._supplyChest.radius + bCfg.radius;
+      for (const chest of this._getActiveSupplyChests()) {
+        const chestDx = b.x - chest.x;
+        const chestDy = b.y - chest.y;
+        const chestThreshold = chest.radius + bCfg.radius;
         if (chestDx * chestDx + chestDy * chestDy < chestThreshold * chestThreshold) {
-          this._handleBulletHitChest(b, this._supplyChest);
+          this._handleBulletHitChest(b, chest);
           return;
         }
       }
 
-      for (const e of this._enemies) {
-        if (e.dead) continue;
-        const dx = b.x - e.x;
-        const dy = b.y - e.y;
-        // 距离平方比较，避免 Math.sqrt 开方运算
-        const threshold = eCfg.width / 2 + bCfg.radius;
-        const distSq = dx * dx + dy * dy;
-        if (distSq < threshold * threshold) {
-          this._audioManager?.enemyHit();
-          this._handleBulletHit(b, e);
-          break;
-        }
+      const bestEnemy =
+        this._pickBestCollisionEnemy(b, collisionEnemies.filter(enemy => enemy.reachedRail), eCfg.width / 2 + bCfg.radius) ||
+        this._pickBestCollisionEnemy(b, collisionEnemies, eCfg.width / 2 + bCfg.radius);
+
+      if (bestEnemy) {
+        this._audioManager?.enemyHit();
+        this._handleBulletHit(b, bestEnemy);
       }
+    });
+  }
+
+  private _pickBestCollisionEnemy(bullet: Bullet, enemies: Enemy[], threshold: number): Enemy | null {
+    if (enemies.length === 0) return null;
+
+    let bestEnemy: Enemy | null = null;
+    let bestDistSq = Infinity;
+    let bestY = Infinity;
+    let bestSibling = -1;
+    const thresholdSq = threshold * threshold;
+
+    for (const enemy of enemies) {
+      const dx = bullet.x - enemy.x;
+      const dy = bullet.y - enemy.y;
+      const distSq = dx * dx + dy * dy;
+      if (distSq >= thresholdSq) continue;
+
+      const sibling = enemy.node.getSiblingIndex();
+      const isMoreFront = enemy.y < bestY - 0.001;
+      const isSameRowButHigher = Math.abs(enemy.y - bestY) <= 0.001 && sibling > bestSibling;
+      const isSameDepthButCloser = Math.abs(enemy.y - bestY) <= 0.001 && sibling === bestSibling && distSq < bestDistSq;
+
+      if (!bestEnemy || isMoreFront || isSameRowButHigher || isSameDepthButCloser) {
+        bestEnemy = enemy;
+        bestDistSq = distSq;
+        bestY = enemy.y;
+        bestSibling = sibling;
+      }
+    }
+
+    return bestEnemy;
+  }
+
+  private _refreshEnemyRenderOrder(): void {
+    if (!this.enemiesNode || this._enemies.length <= 1) return;
+    const ordered = [...this._enemies].filter(enemy => !enemy.dead && enemy.node.parent === this.enemiesNode);
+    ordered.sort((a, b) => b.y - a.y);
+    ordered.forEach((enemy, index) => {
+      enemy.node.setSiblingIndex(index);
     });
   }
 
@@ -812,19 +875,20 @@ export class GameManager extends Component {
     return id;
   }
 
-  private _fireBullet(x: number, y: number, level: number, angle: number = 90, speedMult: number = 1.0): void {
+  private _fireBullet(x: number, y: number, tierIndex: number, angle: number = 90, speedMult: number = 1.0): void {
     if (!this._bulletPool || !this.bulletPoolNode) return;
 
     const bullet = this._bulletPool.get();
     if (bullet) {
+      const evolution = this._applyRunWeaponBonuses(this._getCurrentWeaponEvolution());
       bullet.init(
         x,
         y,
-        level,
+        tierIndex,
         angle,
         speedMult,
         this._damageMultiplier * (this._playerCar?.damageMultiplier || 1),
-        this._getCurrentWeaponEvolution()
+        evolution
       );
       // 只在首次挂载时 addChild，避免重复挂载触发 transform 重建
       if (!bullet.node.parent) {
@@ -1091,7 +1155,7 @@ export class GameManager extends Component {
   // ==================== 广告、补给与结算 ====================
 
   private _handlePlayerDeath(): void {
-    if (!this._playerCar || !this._waveManager || !this._expSystem) return;
+    if (!this._playerCar || !this._waveManager || !this._weaponTierSystem) return;
 
     if (this._damageFlashNode) {
       this._damageFlashNode.active = false;
@@ -1107,7 +1171,7 @@ export class GameManager extends Component {
   }
 
   private _enterVictory(): void {
-    if (!this._waveManager || !this._expSystem) return;
+    if (!this._waveManager || !this._weaponTierSystem) return;
 
     this._completedStageIndex = this._stageManager.currentStageIndex;
     const advanced = this._stageManager.advanceToNextStage();
@@ -1204,7 +1268,7 @@ export class GameManager extends Component {
   }
 
   private _enterGameOver(): void {
-    if (!this._waveManager || !this._expSystem) return;
+    if (!this._waveManager || !this._weaponTierSystem) return;
 
     this._state = 'gameover';
     this._audioManager?.stopBGM();
@@ -1293,185 +1357,188 @@ export class GameManager extends Component {
   }
 
   private _showSupplyPanel(nextWave: number): void {
-    if (this._supplyPanelNode?.isValid) return;
-
+    this._cacheSupplyPanelRefs();
+    if (!this._supplyPanelNode?.isValid) return;
     this._freezeBattle();
     this._adsManager.showBanner('supply');
     const choices = this._pickSupplyOptions();
     const picked = new Set<string>();
     let freePicked = false;
-
-    const panel = this._createModalRoot('SupplyPanel');
-    this._createModalLabel(panel, 'SupplyTitle', `第${nextWave}波前补给`, 46, 250, new Color(255, 226, 130));
-    this._createModalLabel(panel, 'SupplyHint', this._getStageEnemyHint(), 22, 205, new Color(190, 210, 255));
-    const statusLabel = this._createModalLabel(panel, 'SupplyStatus', '选择一个免费补给', 24, 175, Color.WHITE);
-
-    const optionButtons: Node[] = [];
-    choices.forEach((option, index) => {
-      const y = 115 - index * 82;
-      const button = this._createModalButton(
-        panel,
-        `SupplyOption_${option.id}`,
-        `${option.title}\n${this._getSupplyTagText(option)}\n${option.desc}`,
-        y,
-        () => {
-          if (freePicked) return;
-          freePicked = true;
-          picked.add(option.id);
-          this._applySupplyOption(option);
-          const label = statusLabel.getComponent(Label);
-          if (label) label.string = `已获得: ${option.title}`;
-          optionButtons.forEach(btn => this._setButtonEnabled(btn, false));
-        },
-        500,
-        72,
-        new Color(52, 68, 86)
-      );
-      optionButtons.push(button);
-    });
-
-    this._createModalButton(panel, 'SupplyAdExtraBtn', '看广告再拿一项', -180, async () => {
-      if (!freePicked) {
-        const label = statusLabel.getComponent(Label);
-        if (label) label.string = '请先选择一个免费补给';
-        return;
+    this._populateSupplyPanel(
+      `第${nextWave}波前补给`,
+      this._getStageEnemyHint(),
+      '补给仅本关生效',
+      '请选择一张补给卡',
+      choices,
+      async () => {
+        if (!freePicked) {
+          if (this._supplyPanelStatusLabel) this._supplyPanelStatusLabel.string = '请先选择一张补给卡';
+          return;
+        }
+        if (this._supplyAdExtrasUsed >= GameConfig.gameplay.supply.maxAdExtrasPerRun + this._bonusAdSupplyCount) {
+          if (this._supplyPanelStatusLabel) this._supplyPanelStatusLabel.string = '本局广告升级次数已用完';
+          return;
+        }
+        this._state = 'ad';
+        const completed = await this._adsManager.showRewarded('supply');
+        this._state = 'supply';
+        if (!completed) return;
+        const extra = choices.find(option => !picked.has(option.id));
+        if (extra) {
+          picked.add(extra.id);
+          this._applySupplyOption(extra);
+          this._supplyAdExtrasUsed++;
+        }
+        this._closeSupplyPanel(true);
+      },
+      (option, nodes) => {
+        if (freePicked) return;
+        freePicked = true;
+        picked.add(option.id);
+        this._applySupplyOption(option);
+        if (this._supplyPanelStatusLabel) this._supplyPanelStatusLabel.string = `已获得: ${option.title}`;
+        nodes.forEach(node => this._setButtonEnabled(node, false));
+        this._closeSupplyPanel(true);
       }
-      if (this._supplyAdExtrasUsed >= GameConfig.gameplay.supply.maxAdExtrasPerRun + this._bonusAdSupplyCount) {
-        const label = statusLabel.getComponent(Label);
-        if (label) label.string = '本局额外补给次数已用完';
-        return;
-      }
-
-      this._state = 'ad';
-      const completed = await this._adsManager.showRewarded('supply');
-      this._state = 'supply';
-      if (!completed) return;
-
-      const extra = choices.find(option => !picked.has(option.id));
-      if (extra) {
-        picked.add(extra.id);
-        this._applySupplyOption(extra);
-        this._supplyAdExtrasUsed++;
-      }
-      this._closeSupplyPanel(true);
-    }, 360, 68, new Color(255, 210, 92));
-
-    this._createModalButton(panel, 'SupplyContinueBtn', '继续战斗', -270, () => {
-      this._closeSupplyPanel(true);
-    }, 300, 62, new Color(70, 78, 92));
-
-    this._addToOverlay(panel);
-    this._supplyPanelNode = panel;
+    );
   }
 
   private _showSupplyChestReward(chest: SupplyChest): void {
-    if (this._supplyPanelNode?.isValid) return;
-
+    this._cacheSupplyPanelRefs();
+    if (!this._supplyPanelNode?.isValid) return;
     this._freezeBattle();
     this._adsManager.showBanner('supply');
-    const choices = this._pickSupplyOptions(chest.chestType, chest.quality);
-    const picked = new Set<string>();
-    let freePicked = false;
-
-    const panel = this._createModalRoot('ChestSupplyPanel');
-    this._createModalLabel(panel, 'ChestSupplyTitle', `${this._getChestDisplayName(chest.chestType)}开启`, 42, 250, new Color(255, 226, 130));
-    this._createModalLabel(panel, 'ChestSupplyHint', this._getStageEnemyHint(), 20, 208, new Color(190, 210, 255));
-    const subtitle = `${this._getChestQualityName(chest.quality)}补给，当前关卡内生效`;
-    this._createModalLabel(panel, 'ChestSupplySubTitle', subtitle, 22, 182, new Color(190, 210, 255));
-    const statusLabel = this._createModalLabel(panel, 'ChestSupplyStatus', '选择一个战场补给', 24, 148, Color.WHITE);
-
-    const optionButtons: Node[] = [];
-    choices.forEach((option, index) => {
-      const y = 70 - index * 82;
-      const button = this._createModalButton(
-        panel,
-        `ChestSupplyOption_${option.id}`,
-        `${option.title}\n${this._getSupplyTagText(option)}\n${option.desc}`,
-        y,
-        () => {
-          if (freePicked) return;
-          freePicked = true;
-          picked.add(option.id);
-          this._applySupplyOption(option);
-          const label = statusLabel.getComponent(Label);
-          if (label) label.string = `已获得: ${option.title}`;
-          optionButtons.forEach(btn => this._setButtonEnabled(btn, false));
-          this._showFloatingNotice(chest.x, chest.y + 44, option.title, new Color(255, 228, 150));
-        },
-        500,
-        72,
-        new Color(52, 68, 86)
-      );
-      optionButtons.push(button);
-    });
-
-    this._createModalButton(panel, 'ChestSupplyAdExtraBtn', '看广告再拿一项', -200, async () => {
-      if (!freePicked) {
-        const label = statusLabel.getComponent(Label);
-        if (label) label.string = '请先选择一个免费补给';
-        return;
-      }
-      if (this._supplyAdExtrasUsed >= GameConfig.gameplay.supply.maxAdExtrasPerRun + this._bonusAdSupplyCount) {
-        const label = statusLabel.getComponent(Label);
-        if (label) label.string = '本局额外补给次数已用完';
-        return;
-      }
-
-      this._state = 'ad';
-      const completed = await this._adsManager.showRewarded('supply');
-      this._state = 'supply';
-      if (!completed) return;
-
-      const extra = choices.find(option => !picked.has(option.id));
-      if (extra) {
-        picked.add(extra.id);
-        this._applySupplyOption(extra);
+    const choices = this._pickSupplyOptions(chest.chestType, chest.quality, chest.serial);
+    this._populateSupplyPanel(
+      `${this._getChestDisplayName(chest.chestType)}开启`,
+      this._getStageEnemyHint(),
+      `${this._getChestQualityName(chest.quality)}补给，当前关卡内生效`,
+      '选择一张补给卡',
+      choices,
+      async () => {
+        if (this._supplyAdExtrasUsed >= GameConfig.gameplay.supply.maxAdExtrasPerRun + this._bonusAdSupplyCount) {
+          if (this._supplyPanelStatusLabel) this._supplyPanelStatusLabel.string = '本局广告升级次数已用完';
+          return;
+        }
+        this._state = 'ad';
+        const completed = await this._adsManager.showRewarded('supply');
+        this._state = 'supply';
+        if (!completed) return;
         this._supplyAdExtrasUsed++;
+        this._closeSupplyPanel(false);
+        this._showAdvancedSupplyChestReward(chest);
+      },
+      (option) => {
+        this._applySupplyOption(option);
+        this._showFloatingNotice(chest.x, chest.y + 44, option.title, new Color(255, 228, 150));
+        this._closeSupplyPanel(true);
       }
-      this._closeSupplyPanel(true);
-    }, 360, 68, new Color(255, 210, 92));
-
-    this._createModalButton(panel, 'ChestSupplyContinueBtn', '继续战斗', -290, () => {
-      this._closeSupplyPanel(true);
-    }, 300, 62, new Color(70, 78, 92));
-
-    this._addToOverlay(panel);
-    this._supplyPanelNode = panel;
+    );
     this._state = 'supply';
   }
 
-  private _pickSupplyOptions(chestType?: SupplyChestType, chestQuality: SupplyChestQuality = 'normal'): SupplyOptionData[] {
-    const options = [...(GameConfig.gameplay.supply.options as SupplyOptionData[])];
-    if (!chestType && !this._weaponEvolutionId && this._expSystem?.canOfferEvolution) {
+  private _showAdvancedSupplyChestReward(chest: SupplyChest): void {
+    this._cacheSupplyPanelRefs();
+    if (!this._supplyPanelNode?.isValid) return;
+    this._freezeBattle();
+    this._adsManager.showBanner('supply');
+    const upgradedQuality: SupplyChestQuality = chest.quality === 'normal' ? 'elite' : 'rare';
+    const choices = this._pickSupplyOptions(chest.chestType, upgradedQuality, chest.serial + 2);
+    this._populateSupplyPanel(
+      `${this._getChestDisplayName(chest.chestType)}升级补给`,
+      '广告奖励：已刷新为更高级补给，三选一',
+      `${this._getChestQualityName(upgradedQuality)}补给，本关内生效`,
+      '选择一张升级补给卡',
+      choices,
+      async () => {
+        if (this._supplyPanelStatusLabel) this._supplyPanelStatusLabel.string = '高级补给不可再次升级';
+      },
+      (option) => {
+        this._applySupplyOption(option);
+        this._showFloatingNotice(chest.x, chest.y + 44, option.title, new Color(255, 228, 150));
+        this._closeSupplyPanel(true);
+      }
+    );
+    this._state = 'supply';
+  }
+
+  private _pickSupplyOptions(chestType?: SupplyChestType, chestQuality: SupplyChestQuality = 'normal', chestSerial: number = 0): SupplyOptionData[] {
+    const options = [...(GameConfig.gameplay.supply.options as SupplyOptionData[])].filter(option => this._canOfferSupplyOption(option));
+    if ((!chestType || chestSerial >= 2) && !this._weaponEvolutionId) {
       options.push(...(GameConfig.gameplay.weaponEvolution.options as SupplyOptionData[]));
     }
     const supplyTier = this._progressManager.getPermanentBonuses().supplyQualityTier;
     const weightBonus = (GameConfig.gameplay.supply.qualityBonusPerTier || 0) * supplyTier;
+    const phase = this._getChestRewardPhase(chestSerial);
     const weighted = options.map(option => {
       const highValueIds = new Set([
         'repair',
         'max_hp_up',
         'damage_boost',
         'fire_rate_boost_big',
+        'multishot_up',
+        'spread_count_up',
         'shield',
         'bonus_parts',
         'extra_supply_choices',
+        'explode_radius_up',
+        'pierce_up',
+        'chain_up',
+        'chain_range_up',
         'weapon_evo_explode',
         'weapon_evo_pierce',
         'weapon_evo_arc',
       ]);
       let weight = highValueIds.has(option.id) ? 1 + weightBonus : 1;
+      weight *= this._getChestPhaseWeight(option, phase);
       if (chestType) {
         weight *= this._getSupplyChestAffinity(option, chestType);
         if (chestQuality === 'elite') weight *= this._isPremiumSupply(option) ? 1.2 : 1;
         if (chestQuality === 'rare') weight *= this._isPremiumSupply(option) ? 1.4 : 1.05;
       }
+      weight *= this._getEvolutionSynergyWeight(option);
       return { option, score: Math.random() * weight };
     });
     weighted.sort((a, b) => b.score - a.score);
-    return weighted
+    let result = weighted
       .slice(0, GameConfig.gameplay.supply.choiceCount + this._bonusSupplyChoices)
       .map(item => item.option);
+    if (!this._weaponEvolutionId && chestSerial >= 3 && !result.some(option => option.effect.type === 'weaponEvolution')) {
+      const evolutionPool = options.filter(option => option.effect.type === 'weaponEvolution');
+      if (evolutionPool.length > 0) {
+        result[result.length - 1] = evolutionPool[Math.floor(Math.random() * evolutionPool.length)];
+      }
+    }
+    return result;
+  }
+
+  private _canOfferSupplyOption(option: SupplyOptionData): boolean {
+    switch (option.effect.type) {
+      case 'damageMultiplier':
+        if (this._isRunDamageCapped()) return false;
+        break;
+      case 'fireRateMultiplier':
+        if (this._isRunFireRateCapped()) return false;
+        break;
+      case 'multiShotAdd':
+        if (this._getRunMultiShotCap() <= 0) return false;
+        break;
+      case 'spreadCountAdd':
+        if (this._getRunSpreadCountCap() <= 0) return false;
+        break;
+    }
+
+    switch (option.id) {
+      case 'explode_radius_up':
+        return this._weaponEvolutionId === 'mg_explode';
+      case 'pierce_up':
+        return this._weaponEvolutionId === 'mg_pierce';
+      case 'chain_up':
+      case 'chain_range_up':
+        return this._weaponEvolutionId === 'mg_arc';
+      default:
+        return true;
+    }
   }
 
   private _applySupplyOption(option: SupplyOptionData): void {
@@ -1486,12 +1553,28 @@ export class GameManager extends Component {
         this._playerCar.heal(option.effect.value || 0);
         break;
       case 'damageMultiplier':
-        this._damageMultiplier *= option.effect.value || 1;
+        this._damageMultiplier = this._getCappedRunDamageMultiplier(this._damageMultiplier * (option.effect.value || 1));
         this._damageBoostUntilWave = 0;
         break;
       case 'fireRateMultiplier':
-        this._playerCar.setFireRateMultiplier(this._playerCar.fireRateMultiplier * (option.effect.value || 1));
+        this._playerCar.setFireRateMultiplier(
+          this._getCappedRunFireRateMultiplier(this._playerCar.fireRateMultiplier * (option.effect.value || 1))
+        );
         this._fireRateBoostUntilWave = 0;
+        break;
+      case 'multiShotAdd':
+        this._bonusMultiShot = Math.min(
+          this._getRunMultiShotCap(),
+          this._bonusMultiShot + Math.max(0, Math.round(option.effect.value || 0))
+        );
+        this._playerCar.setRunFirePatternBonus(this._bonusMultiShot, this._bonusSpreadCount);
+        break;
+      case 'spreadCountAdd':
+        this._bonusSpreadCount = Math.min(
+          this._getRunSpreadCountCap(),
+          this._bonusSpreadCount + Math.max(0, Math.round(option.effect.value || 0))
+        );
+        this._playerCar.setRunFirePatternBonus(this._bonusMultiShot, this._bonusSpreadCount);
         break;
       case 'shield':
         this._playerCar.setInvulnerable(option.effect.seconds || 0);
@@ -1514,12 +1597,64 @@ export class GameManager extends Component {
       case 'extraAdSupply':
         this._bonusAdSupplyCount += Math.max(0, Math.round(option.effect.value || 0));
         break;
+      case 'explodeRadiusMultiplier':
+        this._bonusExplodeRadiusMultiplier *= option.effect.value || 1;
+        break;
+      case 'pierceAdd':
+        this._bonusPierceCount += Math.max(0, Math.round(option.effect.value || 0));
+        break;
+      case 'chainAdd':
+        this._bonusChainCount += Math.max(0, Math.round(option.effect.value || 0));
+        break;
+      case 'chainRangeMultiplier':
+        this._bonusChainRangeMultiplier *= option.effect.value || 1;
+        break;
       case 'weaponEvolution':
         if (option.effect.evolutionId) {
           this._weaponEvolutionId = option.effect.evolutionId;
         }
         break;
     }
+  }
+
+  private _getRunMultiShotCap(): number {
+    const basePattern = this._weaponTierSystem?.firePattern;
+    const maxBurst = Math.max(...GameConfig.weaponBase.baseBurstCount, 1);
+    const currentBaseBurst = basePattern?.multiShot || 1;
+    return Math.max(0, maxBurst - currentBaseBurst);
+  }
+
+  private _getRunSpreadCountCap(): number {
+    const basePattern = this._weaponTierSystem?.firePattern;
+    const maxSpread = Math.max(...GameConfig.weaponBase.baseSpreadCount, 1);
+    const currentBaseSpread = basePattern?.count || 1;
+    return Math.max(0, maxSpread - currentBaseSpread);
+  }
+
+  private _getCappedRunFireRateMultiplier(nextMultiplier: number): number {
+    const currentBaseFireRate = this._weaponTierSystem?.fireRate || 1;
+    const maxFireRate = Math.max(...GameConfig.weaponBase.fireRate, currentBaseFireRate);
+    const maxMultiplier = maxFireRate / Math.max(0.001, currentBaseFireRate);
+    return Math.max(0.2, Math.min(nextMultiplier, maxMultiplier));
+  }
+
+  private _isRunFireRateCapped(): boolean {
+    const currentBaseFireRate = this._weaponTierSystem?.fireRate || 1;
+    const maxFireRate = Math.max(...GameConfig.weaponBase.fireRate, currentBaseFireRate);
+    return currentBaseFireRate * this._playerCar!.fireRateMultiplier >= maxFireRate - 0.001;
+  }
+
+  private _getCappedRunDamageMultiplier(nextMultiplier: number): number {
+    const currentBaseDamage = this._weaponTierSystem?.damage || 1;
+    const maxDamage = Math.max(...GameConfig.weaponBase.damage, currentBaseDamage);
+    const maxMultiplier = maxDamage / Math.max(0.001, currentBaseDamage);
+    return Math.max(1, Math.min(nextMultiplier, maxMultiplier));
+  }
+
+  private _isRunDamageCapped(): boolean {
+    const currentBaseDamage = this._weaponTierSystem?.damage || 1;
+    const maxDamage = Math.max(...GameConfig.weaponBase.damage, currentBaseDamage);
+    return currentBaseDamage * this._damageMultiplier >= maxDamage - 0.001;
   }
 
   private _applyPendingWaveOpeningEffects(enemies: Enemy[]): void {
@@ -1532,9 +1667,8 @@ export class GameManager extends Component {
 
   private _closeSupplyPanel(resumeGame: boolean): void {
     if (this._supplyPanelNode?.isValid) {
-      this._supplyPanelNode.destroy();
+      this._supplyPanelNode.active = false;
     }
-    this._supplyPanelNode = null;
     this._adsManager.hideBanner();
     this._unfreezeBattle();
     if (resumeGame) {
@@ -1548,9 +1682,7 @@ export class GameManager extends Component {
 
   private _buildAttackTargets(enemies: Enemy[]): AttackTarget[] {
     const targets: AttackTarget[] = [...enemies];
-    if (this._supplyChest && !this._supplyChest.dead) {
-      targets.push(this._supplyChest);
-    }
+    targets.push(...this._getActiveSupplyChests());
     return targets;
   }
 
@@ -1558,125 +1690,126 @@ export class GameManager extends Component {
     return GameConfig.gameplay.supply.chest as SupplyChestConfigData;
   }
 
-  private _ensureSupplyChestNode(): SupplyChest {
-    if (this._supplyChest?.node?.isValid) {
-      return this._supplyChest;
-    }
-
-    const chestNode = new Node('SupplyChest');
-    chestNode.addComponent(UITransform);
-    const chest = chestNode.addComponent(SupplyChest);
+  private _ensureSupplyChestNodes(): SupplyChest[] {
+    const capacity = Math.max(1, this._getSupplyChestConfig().capacity || 1);
     const parent = this.enemiesNode || this._gameLayerNode || director.getScene()?.getChildByName('Canvas');
-    parent?.addChild(chestNode);
-    chest.reset();
-    this._supplyChestNode = chestNode;
-    this._supplyChest = chest;
-    return chest;
+    while (this._supplyChests.length < capacity) {
+      const chestNode = new Node(`SupplyChest_${this._supplyChests.length}`);
+      chestNode.addComponent(UITransform);
+      const chest = chestNode.addComponent(SupplyChest);
+      parent?.addChild(chestNode);
+      chest.reset();
+      this._supplyChests.push(chest);
+    }
+    return this._supplyChests;
   }
 
   private _resetSupplyChestState(): void {
-    this._ensureSupplyChestNode().reset();
+    this._ensureSupplyChestNodes().forEach(chest => chest.reset());
     this._chestSpawnTimer = 0;
     this._chestSpawnDelay = this._rollNextChestDelay();
     this._chestSelectionsThisRun = 0;
-    this._lastChestWaveSpawned = 0;
+    this._chestSpawnSerial = 0;
+    this._setupChestTrack();
   }
 
   private _updateChestSpawn(dt: number, enemies: Enemy[]): void {
     if (this._getSupplyMode() !== 'chest_trigger') return;
     if (!this._waveManager || this._waveManager.inPause) return;
-    if (this._supplyChest && !this._supplyChest.dead) return;
 
     const cfg = this._getSupplyChestConfig();
     const stageWaveNum = this._getStageWaveNum();
     if (this._chestSelectionsThisRun >= cfg.maxSelectionsPerRun) return;
     if (stageWaveNum < cfg.minWave) return;
-    if (this._lastChestWaveSpawned === stageWaveNum) return;
     if (enemies.length === 0) return;
+    if (this._getActiveSupplyChests().length >= Math.max(1, cfg.capacity || 1)) return;
 
     this._chestSpawnTimer += dt;
     if (this._chestSpawnTimer < this._chestSpawnDelay) return;
-    this._spawnSupplyChest(enemies);
+    this._spawnSupplyChest();
   }
 
-  private _spawnSupplyChest(enemies: Enemy[]): void {
+  private _spawnSupplyChest(): void {
     if (!this._waveManager) return;
     const cfg = this._getSupplyChestConfig();
+    const chest = this._supplyChests.find(item => item.dead);
+    if (!chest) return;
     const quality = this._pickChestQuality();
     const type = this._pickChestType();
     const waveData = this._waveManager.getWaveData(Math.max(0, this._waveManager.waveIndex));
-    const hpMult = cfg.hpMultiplier[quality] || cfg.hpMultiplier.normal;
-    const hp = Math.max(60, Math.round(waveData.hp * hpMult));
-    const speed = Math.max(16, waveData.speed * cfg.speedMultiplier);
-    const atk = Math.max(4, Math.round(waveData.atk * cfg.attackMultiplier));
-    const attackRate = Math.max(0.35, GameConfig.enemy.attackRate * cfg.attackRateMultiplier);
-    const x = this._pickChestX(enemies);
-    const y = this._pickChestY();
-
-    this._ensureSupplyChestNode().init(type, quality, x, y, hp, cfg.radius, speed, atk, attackRate);
-    this._lastChestWaveSpawned = this._getStageWaveNum();
+    const serial = this._chestSpawnSerial;
+    const hp = this._getSupplyChestHp(serial, waveData.hp);
+    const slot = this._chestSlots[0];
+    chest.init(type, quality, slot.x, this._getChestSpawnY(), hp, cfg.radius, serial, cfg.speedMultiplier, 0, 0);
+    chest.setTrackTarget(slot.x, slot.y);
+    this._chestSpawnSerial++;
+    this._reflowChestTrack();
     this._chestSpawnTimer = 0;
     this._chestSpawnDelay = this._rollNextChestDelay();
-    this._showFloatingNotice(x, y + 56, `${this._getChestDisplayName(type)}出现`, new Color(255, 223, 140));
+    this._showFloatingNotice(slot.x, slot.y + 56, `${this._getChestDisplayName(type)}入列`, new Color(255, 223, 140));
   }
 
   private _handleSupplyChestDestroyed(chest: SupplyChest): void {
+    const cfg = this._getSupplyChestConfig();
     this._chestSelectionsThisRun++;
     this._spawnPulse(chest.x, chest.y, chest.radius * 1.8, '#ffd166', 0.25);
     this._spawnBurstRing(chest.x, chest.y, chest.radius * 1.2, '#ffd166');
     chest.reset();
+    this._reflowChestTrack();
+    this._chestSpawnTimer = 0;
+    this._chestSpawnDelay = Math.max(0.15, cfg.refillDelay || 0.45);
     this._showSupplyChestReward(chest);
   }
 
   private _rollNextChestDelay(): number {
     const cfg = this._getSupplyChestConfig();
-    return Math.max(3, cfg.baseSpawnDelay + (Math.random() * 2 - 1) * cfg.delayVariance);
+    return Math.max(0.15, cfg.baseSpawnDelay + (Math.random() * 2 - 1) * cfg.delayVariance);
   }
 
   private _pickChestType(): SupplyChestType {
-    if (this._playerCar && this._playerCar.hp / this._playerCar.maxHp <= 0.35) {
-      return Math.random() < 0.55 ? 'survival' : 'control';
-    }
-    const table: SupplyChestType[] = ['firepower', 'survival', 'control', 'resource', 'firepower', 'control'];
+    const table: SupplyChestType[] = ['firepower', 'firepower', 'control', 'control', 'rare'];
     return table[Math.floor(Math.random() * table.length)];
   }
 
   private _pickChestQuality(): SupplyChestQuality {
     if (!this._waveManager) return 'normal';
-    const waveNum = this._getStageWaveNum();
-    const roll = Math.random();
-    if (waveNum >= 5 && roll > 0.86) return 'rare';
-    if (waveNum >= 3 && roll > 0.58) return 'elite';
+    const serial = this._chestSpawnSerial;
+    if (serial >= 6) return 'rare';
+    if (serial >= 2) return 'elite';
     return 'normal';
   }
 
-  private _pickChestX(enemies: Enemy[]): number {
-    const aliveAhead = enemies.filter(enemy => !enemy.dead && enemy.y > 40);
-    if (aliveAhead.length > 0) {
-      const sample = aliveAhead[Math.floor(Math.random() * aliveAhead.length)];
-      return Math.max(GameConfig.bridge.left + 50, Math.min(GameConfig.bridge.right - 50, sample.x));
-    }
-    return GameConfig.bridge.left + 70 + Math.random() * (GameConfig.bridge.right - GameConfig.bridge.left - 140);
-  }
-
-  private _pickChestY(): number {
-    const cfg = this._getSupplyChestConfig();
-    return cfg.lowerY + Math.random() * Math.max(0, cfg.upperY - cfg.lowerY);
-  }
-
   private _getSupplyChestAffinity(option: SupplyOptionData, chestType: SupplyChestType): number {
-    const firepower = new Set(['damage_boost', 'fire_rate_boost', 'fire_rate_boost_big', 'extra_supply_choices']);
-    const survival = new Set(['repair_small', 'repair', 'max_hp_up', 'shield']);
-    const control = new Set(['knockback_round', 'slow_round']);
-    const resource = new Set(['bonus_coins', 'bonus_parts', 'extra_ad_supply']);
-    const rare = new Set(['repair', 'max_hp_up', 'fire_rate_boost_big', 'shield', 'bonus_parts']);
+    const firepower = new Set([
+      'damage_boost',
+      'fire_rate_boost',
+      'fire_rate_boost_big',
+      'multishot_up',
+      'spread_count_up',
+      'weapon_evo_explode',
+      'weapon_evo_pierce',
+      'weapon_evo_arc',
+    ]);
+    const control = new Set(['knockback_round', 'slow_round', 'chain_up', 'chain_range_up']);
+    const rare = new Set([
+      'fire_rate_boost_big',
+      'multishot_up',
+      'spread_count_up',
+      'explode_radius_up',
+      'pierce_up',
+      'chain_up',
+      'chain_range_up',
+      'weapon_evo_explode',
+      'weapon_evo_pierce',
+      'weapon_evo_arc',
+    ]);
 
     const map: Record<SupplyChestType, Set<string>> = {
       firepower,
-      survival,
       control,
-      resource,
       rare,
+      survival: firepower,
+      resource: control,
     };
     if (map[chestType].has(option.id)) return 2.4;
     if (chestType === 'rare' && this._isPremiumSupply(option)) return 1.8;
@@ -1684,16 +1817,27 @@ export class GameManager extends Component {
   }
 
   private _isPremiumSupply(option: SupplyOptionData): boolean {
-    return new Set(['repair', 'max_hp_up', 'fire_rate_boost_big', 'shield', 'bonus_parts']).has(option.id);
+    return new Set([
+      'fire_rate_boost_big',
+      'multishot_up',
+      'spread_count_up',
+      'explode_radius_up',
+      'pierce_up',
+      'chain_up',
+      'chain_range_up',
+      'weapon_evo_explode',
+      'weapon_evo_pierce',
+      'weapon_evo_arc',
+    ]).has(option.id);
   }
 
   private _getChestDisplayName(chestType: SupplyChestType): string {
     const map: Record<SupplyChestType, string> = {
       firepower: '火力箱',
-      survival: '生存箱',
       control: '控制箱',
-      resource: '资源箱',
       rare: '稀有箱',
+      survival: '火力箱',
+      resource: '控制箱',
     };
     return map[chestType];
   }
@@ -1711,17 +1855,13 @@ export class GameManager extends Component {
     if (this._battleFrozen) return;
     this._battleFrozen = true;
     this._enemies.forEach(enemy => enemy.setBattleFrozen(true));
-    if (this._supplyChest && !this._supplyChest.dead) {
-      this._supplyChest.setBattleFrozen(true);
-    }
+    this._getActiveSupplyChests().forEach(chest => chest.setBattleFrozen(true));
   }
 
   private _unfreezeBattle(): void {
     this._battleFrozen = false;
     this._enemies.forEach(enemy => enemy.setBattleFrozen(false));
-    if (this._supplyChest && !this._supplyChest.dead) {
-      this._supplyChest.setBattleFrozen(false);
-    }
+    this._getActiveSupplyChests().forEach(chest => chest.setBattleFrozen(false));
   }
 
   private _createModalRoot(name: string): Node {
@@ -1791,11 +1931,162 @@ export class GameManager extends Component {
     return node;
   }
 
+  private _createModalIconButton(parent: Node, name: string, text: string, iconPath: string, y: number, callback: () => void, width: number, height: number, color: Color): Node {
+    const node = new Node(name);
+    const transform = node.addComponent(UITransform);
+    transform.setContentSize(width, height);
+    node.setPosition(0, y, 0);
+
+    const graphics = node.addComponent(Graphics);
+    graphics.fillColor = color.clone();
+    graphics.roundRect(-width / 2, -height / 2, width, height, 12);
+    graphics.fill();
+
+    node.addComponent(Button);
+    node.on(Node.EventType.TOUCH_END, callback, this);
+
+    const iconNode = new Node('Icon');
+    const iconTransform = iconNode.addComponent(UITransform);
+    iconTransform.setContentSize(48, 48);
+    iconNode.setPosition(-width / 2 + 34, 0, 0);
+    const iconSprite = iconNode.addComponent(Sprite);
+    iconSprite.sizeMode = Sprite.SizeMode.CUSTOM;
+    iconSprite.type = Sprite.Type.SIMPLE;
+    iconNode.addComponent(UIOpacity);
+    node.addChild(iconNode);
+    const resourcePath = iconPath.replace(/^db:\/\/assets\/resources\//, '').replace(/\.png$/i, '');
+    resources.load(resourcePath, SpriteFrame, (err, sf) => {
+      if (!err && sf && iconNode.isValid) {
+        iconSprite.spriteFrame = sf;
+      }
+    });
+
+    const labelNode = new Node('Label');
+    const labelTransform = labelNode.addComponent(UITransform);
+    labelTransform.setContentSize(width - 92, height - 10);
+    labelNode.setPosition(38, 0, 0);
+    const label = labelNode.addComponent(Label);
+    label.string = text;
+    label.fontSize = text.includes('\n') ? 21 : 25;
+    label.lineHeight = text.includes('\n') ? 26 : 30;
+    label.horizontalAlign = Label.HorizontalAlign.LEFT;
+    label.verticalAlign = Label.VerticalAlign.CENTER;
+    label.color = color.r > 180 ? new Color(60, 40, 0) : Color.WHITE.clone();
+    node.addChild(labelNode);
+
+    parent.addChild(node);
+    return node;
+  }
+
+  private _getSupplyIconPath(optionId: string): string {
+    const map: Record<string, string> = {
+      damage_boost: 'db://assets/resources/ui/common/icons_supply_v2/icon_supply_damage.png',
+      fire_rate_boost: 'db://assets/resources/ui/common/icons_supply_v2/icon_supply_fire_rate.png',
+      fire_rate_boost_big: 'db://assets/resources/ui/common/icons_supply_v2/icon_supply_fire_rate_big.png',
+      multishot_up: 'db://assets/resources/ui/common/icons_supply_v2/icon_supply_multishot.png',
+      spread_count_up: 'db://assets/resources/ui/common/icons_supply_v2/icon_supply_spread_count.png',
+      knockback_round: 'db://assets/resources/ui/common/icons_supply_v2/icon_supply_knockback.png',
+      slow_round: 'db://assets/resources/ui/common/icons_supply_v2/icon_supply_slow.png',
+      explode_radius_up: 'db://assets/resources/ui/common/icons_supply_v2/icon_supply_explode_radius.png',
+      pierce_up: 'db://assets/resources/ui/common/icons_supply_v2/icon_supply_pierce_up.png',
+      chain_up: 'db://assets/resources/ui/common/icons_supply_v2/icon_supply_chain_up.png',
+      chain_range_up: 'db://assets/resources/ui/common/icons_supply_v2/icon_supply_chain_range.png',
+    };
+    return map[optionId] || map.damage_boost;
+  }
+
+  private _populateSupplyPanel(
+    title: string,
+    hint: string,
+    subTitle: string,
+    status: string,
+    choices: SupplyOptionData[],
+    onAdClick: () => void | Promise<void>,
+    onPick: (option: SupplyOptionData, nodes: Node[]) => void
+  ): void {
+    this._cacheSupplyPanelRefs();
+    if (!this._supplyPanelNode) return;
+    this._supplyPanelNode.active = true;
+    if (this._supplyPanelTitleLabel) this._supplyPanelTitleLabel.string = title;
+    if (this._supplyPanelHintLabel) this._supplyPanelHintLabel.string = hint;
+    if (this._supplyPanelSubTitleLabel) this._supplyPanelSubTitleLabel.string = subTitle;
+    if (this._supplyPanelStatusLabel) this._supplyPanelStatusLabel.string = status;
+
+    const panelRoot = this._supplyPanelNode.getChildByName('PanelRoot');
+    const cardsRoot = panelRoot?.getChildByName('Cards');
+    const cardNames = ['CardLeft', 'CardCenter', 'CardRight'];
+    const cardNodes = cardNames
+      .map(name => cardsRoot?.getChildByName(name) || null)
+      .filter((node): node is Node => Boolean(node));
+
+    cardNodes.forEach((card, index) => {
+      const option = choices[index];
+      card.active = !!option;
+      if (!option) return;
+
+      const titleLabel = card.getChildByName('TitleLabel')?.getComponent(Label);
+      const tagLabel = card.getChildByName('TagLabel')?.getComponent(Label);
+      const descLabel = card.getChildByName('DescLabel')?.getComponent(Label);
+      const iconSprite = card.getChildByName('Icon')?.getComponent(Sprite);
+      const button = card.getComponent(Button);
+
+      if (titleLabel) titleLabel.string = option.title;
+      if (tagLabel) tagLabel.string = this._getSupplyTagText(option);
+      if (descLabel) descLabel.string = option.desc;
+
+      const resourcePath = this._getSupplyIconPath(option.id).replace(/^db:\/\/assets\/resources\//, '').replace(/\.png$/i, '');
+      if (iconSprite) {
+        iconSprite.spriteFrame = null;
+        resources.load(resourcePath, SpriteFrame, (err, sf) => {
+          if (!err && sf && iconSprite.isValid) {
+            iconSprite.spriteFrame = sf;
+          }
+        });
+      }
+
+      card.targetOff(Node.EventType.TOUCH_END);
+      card.on(Node.EventType.TOUCH_END, () => onPick(option, cardNodes), this);
+      if (button) button.interactable = true;
+      const opacity = card.getComponent(UIOpacity) || card.addComponent(UIOpacity);
+      opacity.opacity = 255;
+    });
+
+    if (this._supplyPanelAdButton) {
+      this._supplyPanelAdButton.active = true;
+      this._supplyPanelAdButton.targetOff(Node.EventType.TOUCH_END);
+      this._supplyPanelAdButton.on(Node.EventType.TOUCH_END, () => { void onAdClick(); }, this);
+    }
+  }
+
   private _setButtonEnabled(node: Node, enabled: boolean): void {
     const button = node.getComponent(Button);
     if (button) button.interactable = enabled;
     const opacity = node.getComponent(UIOpacity) || node.addComponent(UIOpacity);
     opacity.opacity = enabled ? 255 : 110;
+  }
+
+  private _cacheSupplyPanelRefs(overlayNode?: Node | null): void {
+    const overlay = overlayNode
+      || director.getScene()?.getChildByName('Canvas')?.getChildByName('Overlay')
+      || null;
+
+    this._supplyPanelNode = overlay?.getChildByName('SupplyPanel') || null;
+    if (!this._supplyPanelNode) {
+      this._supplyPanelTitleLabel = null;
+      this._supplyPanelHintLabel = null;
+      this._supplyPanelSubTitleLabel = null;
+      this._supplyPanelStatusLabel = null;
+      this._supplyPanelAdButton = null;
+      return;
+    }
+
+    this._supplyPanelNode.active = false;
+    const panelRoot = this._supplyPanelNode.getChildByName('PanelRoot');
+    this._supplyPanelTitleLabel = panelRoot?.getChildByName('TitleLabel')?.getComponent(Label) || null;
+    this._supplyPanelHintLabel = panelRoot?.getChildByName('HintLabel')?.getComponent(Label) || null;
+    this._supplyPanelSubTitleLabel = panelRoot?.getChildByName('SubTitleLabel')?.getComponent(Label) || null;
+    this._supplyPanelStatusLabel = panelRoot?.getChildByName('StatusLabel')?.getComponent(Label) || null;
+    this._supplyPanelAdButton = panelRoot?.getChildByName('AdButton') || null;
   }
 
   private _addToOverlay(node: Node): void {
@@ -1873,7 +2164,7 @@ export class GameManager extends Component {
 
   // ==================== 状态切换 ====================
 
-  startGame(startWave?: number, startLevel?: number, forcedEvolution?: WeaponEvolutionId | 'none'): void {
+  startGame(startWave?: number, startTier?: number, forcedEvolution?: WeaponEvolutionId | 'none'): void {
     const permanentBonuses = this._progressManager.getPermanentBonuses();
     this._state = 'playing';
     this._kills = 0;
@@ -1901,6 +2192,12 @@ export class GameManager extends Component {
     this._bonusFlatParts = 0;
     this._bonusSupplyChoices = 0;
     this._bonusAdSupplyCount = 0;
+    this._bonusMultiShot = 0;
+    this._bonusSpreadCount = 0;
+    this._bonusExplodeRadiusMultiplier = 1;
+    this._bonusPierceCount = 0;
+    this._bonusChainCount = 0;
+    this._bonusChainRangeMultiplier = 1;
     this._weaponEvolutionId = forcedEvolution && forcedEvolution !== 'none' ? forcedEvolution : null;
     this._waveSupportTimers.clear();
     this._enemySkillIds = new WeakMap();
@@ -1928,7 +2225,7 @@ export class GameManager extends Component {
     this._damageFlashTimer = 0;
 
     // 重置系统
-    this._expSystem?.reset();
+    this._weaponTierSystem?.reset();
     this._waveManager?.reset();
     this._stageManager.reset();
     const targetStageIndex = startWave && startWave > 1
@@ -1938,12 +2235,13 @@ export class GameManager extends Component {
     this._currentStageIndex = targetStageIndex;
     this._completedStageIndex = targetStageIndex;
 
-    // 设置调试参数
-    if (startLevel && startLevel > 1) {
-      this._expSystem?.setLevel(startLevel);
-      if (this._playerCar) {
-        this._playerCar.setExpSystem(this._expSystem);
-      }
+    // 设置开局基础武器档位：默认读取局外成长，调试入口可覆盖
+    const resolvedStartTier = startTier && startTier > 0
+      ? startTier
+      : permanentBonuses.baseWeaponTier;
+    this._weaponTierSystem?.setTier(resolvedStartTier);
+    if (this._playerCar) {
+      this._playerCar.setWeaponTierSystem(this._weaponTierSystem);
     }
     if (startWave && startWave > 1) {
       this._waveManager!.waveIndex = startWave - 1;
@@ -1955,6 +2253,7 @@ export class GameManager extends Component {
     this._playerCar?.setPermanentStats(GameConfig.car.hp + permanentBonuses.carHpFlat, permanentBonuses.carDamageMultiplier);
     this._playerCar?.reset();
     this._playerCar?.setFireRateMultiplier(1);
+    this._playerCar?.setRunFirePatternBonus(0, 0);
 
     // 清空对象池
     this._bulletPool?.putAll();
@@ -2013,6 +2312,13 @@ export class GameManager extends Component {
     return upgraded;
   }
 
+  private _resetGarageProgress(): void {
+    this._progressManager.resetAll();
+    this._syncCurrentStageSelectionFromProgress();
+    this._garageScreen?.refresh();
+    this._refreshStartStageInfo();
+  }
+
   private _getCurrentWeaponEvolution(): WeaponEvolutionData | null {
     if (!this._weaponEvolutionId) return null;
     const defs = GameConfig.gameplay.weaponEvolution.defs as Record<WeaponEvolutionId, WeaponEvolutionData>;
@@ -2021,10 +2327,10 @@ export class GameManager extends Component {
 
   private _getWeaponDisplayName(): string {
     const evo = this._getCurrentWeaponEvolution();
-    if (!evo || !this._expSystem) {
-      return this._expSystem?.weaponName || '机炮';
+    if (!evo || !this._weaponTierSystem) {
+      return this._weaponTierSystem?.weaponName || '机炮';
     }
-    return `${this._expSystem.weaponName}-${evo.shortName}`;
+    return `${this._weaponTierSystem.weaponName}-${evo.shortName}`;
   }
 
   private _getStageDisplayLabel(): string {
@@ -2053,10 +2359,11 @@ export class GameManager extends Component {
   private _getWaveKillCount(waveIndex: number): number {
     const waveDef = GameConfig.waveDefs[waveIndex] || this._waveManager?.getWaveDefinition(waveIndex) || null;
     if (waveDef) {
-      return Math.max(1, waveDef.entries.reduce((sum, entry) => sum + entry.count, 0));
+      const raw = Math.max(1, waveDef.entries.reduce((sum, entry) => sum + entry.count, 0));
+      return Math.max(1, Math.round(raw * this._getStageEnemyDensityMultiplier(waveIndex)));
     }
     const waveData = this._waveManager?.getWaveData(waveIndex);
-    return Math.max(1, waveData?.count || 1);
+    return Math.max(1, Math.round((waveData?.count || 1) * this._getStageEnemyDensityMultiplier(waveIndex)));
   }
 
   private _getStageKillProgressPct(stageIndex: number = this._stageManager.currentStageIndex): number {
@@ -2151,6 +2458,18 @@ export class GameManager extends Component {
     if (fireRateBoostPct > 0) {
       parts.push(`射速+${fireRateBoostPct}%`);
     }
+    if (this._bonusMultiShot > 0) {
+      parts.push(`连发+${this._bonusMultiShot}`);
+    }
+    if (this._bonusSpreadCount > 0) {
+      parts.push(`并发+${this._bonusSpreadCount}`);
+    }
+    if (this._bonusPierceCount > 0) {
+      parts.push(`穿透+${this._bonusPierceCount}`);
+    }
+    if (this._bonusChainCount > 0) {
+      parts.push(`电弧+${this._bonusChainCount}`);
+    }
 
     if (this._pendingKnockbackDistance > 0) {
       parts.push(`击退 ${Math.round(this._pendingKnockbackDistance)}`);
@@ -2172,8 +2491,129 @@ export class GameManager extends Component {
     return `本关增益: ${parts.join(' · ')}`;
   }
 
+  private _getActiveSupplyChests(): SupplyChest[] {
+    return this._supplyChests.filter(chest => !chest.dead);
+  }
+
+  private _setupChestTrack(): void {
+    const cfg = this._getSupplyChestConfig();
+    const bridgeHeight = GameConfig.bridge.top - GameConfig.bridge.railY;
+    const capacity = Math.max(1, cfg.capacity || 1);
+    const laneCount = GameConfig.bridge.laneCount;
+    const laneWidth = (GameConfig.bridge.right - GameConfig.bridge.left) / laneCount;
+    const laneIndex = Math.max(0, Math.min(laneCount - 1, cfg.laneIndex || 0));
+    this._chestTrackX = GameConfig.bridge.left + (laneIndex + 0.5) * laneWidth;
+    const stopY = GameConfig.bridge.top - bridgeHeight * Math.max(0.1, Math.min(0.9, cfg.stopRatio || 0.75));
+    const gap = Math.max((cfg.radius || 58) * 2 + 10, cfg.slotGap || 18);
+    this._chestSlots = [];
+    for (let i = 0; i < capacity; i++) {
+      this._chestSlots.push({
+        x: this._chestTrackX,
+        y: stopY + gap * (capacity - 1 - i),
+      });
+    }
+  }
+
+  private _reflowChestTrack(): void {
+    const active = this._getActiveSupplyChests().sort((a, b) => b.serial - a.serial);
+    const slotCount = this._chestSlots.length;
+    const startIndex = Math.max(0, slotCount - active.length);
+    active.forEach((chest, index) => {
+      const slot = this._chestSlots[startIndex + index];
+      if (!slot) return;
+      chest.setTrackTarget(slot.x, slot.y);
+    });
+  }
+
+  private _getSupplyChestHp(serial: number, waveHp: number): number {
+    const cfg = this._getSupplyChestConfig();
+    const waveFactor = this._getStageChestHpMultiplier();
+    const serialFactor = 1 + serial * (cfg.serialGrowth || 0.09);
+    const positionFactor = 1.06;
+    return Math.max(50, Math.round(waveHp * (cfg.baseHpFactor || 4.8) * waveFactor * serialFactor * positionFactor));
+  }
+
+  private _getChestRewardPhase(chestSerial: number): ChestPhase {
+    const thresholds = this._getSupplyChestConfig().phaseThresholds || [2, 5];
+    if (chestSerial < thresholds[0]) return 'early';
+    if (chestSerial < thresholds[1]) return 'mid';
+    return 'late';
+  }
+
+  private _getChestPhaseWeight(option: SupplyOptionData, phase: ChestPhase): number {
+    const earlyIds = new Set(['damage_boost', 'fire_rate_boost', 'multishot_up', 'spread_count_up']);
+    const midIds = new Set(['damage_boost', 'fire_rate_boost', 'multishot_up', 'spread_count_up', 'weapon_evo_explode', 'weapon_evo_pierce', 'weapon_evo_arc', 'knockback_round', 'slow_round']);
+    const lateIds = new Set(['multishot_up', 'spread_count_up', 'fire_rate_boost_big', 'explode_radius_up', 'pierce_up', 'chain_up', 'chain_range_up', 'damage_boost']);
+    if (phase === 'early' && earlyIds.has(option.id)) return 2.2;
+    if (phase === 'mid' && midIds.has(option.id)) return 2.1;
+    if (phase === 'late' && lateIds.has(option.id)) return 2.25;
+    if (phase === 'early' && option.effect.type === 'weaponEvolution') return 0.15;
+    return 1;
+  }
+
+  private _getEvolutionSynergyWeight(option: SupplyOptionData): number {
+    if (!this._weaponEvolutionId) return 1;
+    if (this._weaponEvolutionId === 'mg_explode' && new Set(['explode_radius_up', 'spread_count_up', 'damage_boost']).has(option.id)) return 1.8;
+    if (this._weaponEvolutionId === 'mg_pierce' && new Set(['pierce_up', 'multishot_up', 'damage_boost']).has(option.id)) return 1.8;
+    if (this._weaponEvolutionId === 'mg_arc' && new Set(['chain_up', 'chain_range_up', 'slow_round']).has(option.id)) return 1.8;
+    return 1;
+  }
+
+  private _applyRunWeaponBonuses(baseEvolution: WeaponEvolutionData | null): WeaponEvolutionData | null {
+    if (!baseEvolution) return null;
+    return {
+      ...baseEvolution,
+      explodeRadius: Math.round((baseEvolution.explodeRadius || 0) * this._bonusExplodeRadiusMultiplier),
+      pierceCount: (baseEvolution.pierceCount || 0) + this._bonusPierceCount,
+      chainCount: (baseEvolution.chainCount || 0) + this._bonusChainCount,
+      chainRange: Math.round((baseEvolution.chainRange || 0) * this._bonusChainRangeMultiplier),
+    };
+  }
+
+  private _getChestSpawnY(): number {
+    return GameConfig.bridge.top + Math.max(40, (this._getSupplyChestConfig().radius || 58) * 1.8);
+  }
+
   private _getStageDefs(): Array<{ label: string; name: string; waveCount: number; rewardBonus: { coins: number; parts: number }; startWave?: number }> {
     return (GameConfig.stages || []) as Array<{ label: string; name: string; waveCount: number; rewardBonus: { coins: number; parts: number }; startWave?: number }>;
+  }
+
+  private _getCurrentStageDef(): {
+    label: string;
+    name: string;
+    waveCount: number;
+    rewardBonus: { coins: number; parts: number };
+    startWave?: number;
+    enemyDensityByWave?: number[];
+    chestHpMultiplierByWave?: number[];
+  } | null {
+    const stageDefs = this._getStageDefs() as Array<{
+      label: string;
+      name: string;
+      waveCount: number;
+      rewardBonus: { coins: number; parts: number };
+      startWave?: number;
+      enemyDensityByWave?: number[];
+      chestHpMultiplierByWave?: number[];
+    }>;
+    return stageDefs[this._stageManager.currentStageIndex] || null;
+  }
+
+  private _getStageEnemyDensityMultiplier(waveIndex: number = Math.max(0, (this._waveManager?.currentWaveNum || 1) - 1)): number {
+    const stage = this._getCurrentStageDef();
+    if (!stage?.enemyDensityByWave?.length) return 1;
+    const localWave = Math.max(0, waveIndex - ((stage.startWave || 1) - 1));
+    return stage.enemyDensityByWave[Math.min(localWave, stage.enemyDensityByWave.length - 1)] || 1;
+  }
+
+  private _getStageChestHpMultiplier(): number {
+    const stage = this._getCurrentStageDef();
+    if (!stage?.chestHpMultiplierByWave?.length) {
+      const cfg = this._getSupplyChestConfig();
+      return 1 + Math.max(0, this._getStageWaveNum() - 1) * (cfg.waveGrowth || 0.1);
+    }
+    const localWave = Math.max(0, this._getStageWaveNum() - 1);
+    return stage.chestHpMultiplierByWave[Math.min(localWave, stage.chestHpMultiplierByWave.length - 1)] || 1;
   }
 
   private _clampStageIndex(index: number, maxIndex?: number): number {
@@ -2205,14 +2645,17 @@ export class GameManager extends Component {
 
     const canPrev = this._currentStageIndex > 0;
     const canNext = this._currentStageIndex < this._progressManager.unlockedStageIndex && this._currentStageIndex < stageDefs.length - 1;
-    const partsSuffix = stage.rewardBonus.parts > 0 ? ` · 零件+${stage.rewardBonus.parts}` : '';
-    startScreen.updateStageInfo(
-      '当前关卡',
-      `第${this._currentStageIndex + 1}关 ${stage.name}`,
-      `${stage.waveCount} 波 · 金币+${stage.rewardBonus.coins}${partsSuffix}`,
+    startScreen.updateStageInfo({
+      eyebrow: '当前作战关卡',
+      code: stage.label || `第${this._currentStageIndex + 1}关`,
+      name: stage.name,
+      waveText: `${stage.waveCount} 波`,
+      rewardText: `金币 +${stage.rewardBonus.coins}`,
+      partsText: stage.rewardBonus.parts > 0 ? `零件 +${stage.rewardBonus.parts}` : '',
+      hintText: this._getStageEnemyHint(this._currentStageIndex).replace(/^敌情提示:\s*/, ''),
       canPrev,
-      canNext
-    );
+      canNext,
+    });
   }
 
   private _changeStageSelection(offset: number): void {
@@ -2242,15 +2685,15 @@ export class GameManager extends Component {
     this._debugWave = Math.max(1, Math.min(99, wave));
   }
 
-  setDebugLevel(level: number): void {
-    this._debugLevel = Math.max(1, Math.min(6, level));
+  setDebugTier(tier: number): void {
+    this._debugTier = Math.max(1, Math.min(6, tier));
   }
 
   get debugWave(): number { return this._debugWave; }
-  get debugLevel(): number { return this._debugLevel; }
+  get debugTier(): number { return this._debugTier; }
   get state(): GameState { return this._state; }
   get kills(): number { return this._kills; }
-  get expSystem(): ExpSystem | null { return this._expSystem; }
+  get weaponTierSystem(): WeaponTierSystem | null { return this._weaponTierSystem; }
   get waveManager(): WaveManager | null { return this._waveManager; }
   get playerCar(): PlayerCar | null { return this._playerCar; }
 

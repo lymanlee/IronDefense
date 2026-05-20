@@ -15,13 +15,13 @@ export class Bullet extends Component {
   private _y: number = 0;
   private _speed: number = 400;
   private _damage: number = 15;
-  private _level: number = 0;
+  private _tierIndex: number = 0;
   private _dead: boolean = false;
   private _angle: number = 90;   // 发射角度（度），90°=垂直向上
   private _vx: number = 0;       // X轴速度分量
   private _vy: number = 0;       // Y轴速度分量
   private _speedMult: number = 1.0; // 速度倍率（用于连发子弹差异化）
-  private _lastColorLevel: number = -1; // 缓存上次颜色等级
+  private _lastColorKey: string = ''; // 缓存上次颜色键，避免对象池复用时混色
   private _sprite: Sprite | null = null;
   private _behavior: WeaponBehavior = 'normal';
   private _explodeRadius: number = 0;
@@ -36,7 +36,7 @@ export class Bullet extends Component {
    * 初始化子弹
    * @param x 起始X坐标
    * @param y 起始Y坐标
-   * @param level 子弹等级
+   * @param tierIndex 基础武器档位索引
    * @param angle 发射角度（度），90°=垂直向上，0°=水平向右
    * @param speedMult 速度倍率（用于连发子弹差异化）
    * @param damageMultiplier 临时伤害倍率（补给效果）
@@ -44,7 +44,7 @@ export class Bullet extends Component {
   init(
     x: number,
     y: number,
-    level: number,
+    tierIndex: number,
     angle: number = 90,
     speedMult: number = 1.0,
     damageMultiplier: number = 1.0,
@@ -52,7 +52,7 @@ export class Bullet extends Component {
   ): void {
     this._x = x;
     this._y = y;
-    this._level = level;
+    this._tierIndex = tierIndex;
     this._angle = angle;
     this._speedMult = speedMult;
     this._dead = false;
@@ -65,12 +65,12 @@ export class Bullet extends Component {
     this._chainMultiplier = evolution?.chainMultiplier || 0;
     this._evolutionTint = evolution?.tint || null;
 
-    const idx = Math.min(level, GameConfig.bullet.speed.length - 1);
-    const baseSpeed = GameConfig.bullet.speed[idx];
+    const idx = Math.min(tierIndex, GameConfig.weaponBase.speed.length - 1);
+    const baseSpeed = GameConfig.weaponBase.speed[idx];
     this._speed = baseSpeed * speedMult;
     this._damage = Math.max(
       1,
-      Math.round(GameConfig.bullet.damage[idx] * damageMultiplier * (evolution?.damageMultiplier || 1))
+      Math.round(GameConfig.weaponBase.damage[idx] * damageMultiplier * (evolution?.damageMultiplier || 1))
     );
 
     // 计算速度分量（角度转弧度）
@@ -84,12 +84,9 @@ export class Bullet extends Component {
 
   /**
    * 设置子弹颜色（通过 Sprite.color tint 白色精灵图）
-   * 只在等级变化时才更新，避免每帧设置 color
+   * 同时缓存等级与分支色，避免对象池复用时沿用旧色
    */
   private _applyColor(): void {
-    if (this._level === this._lastColorLevel) return;
-    this._lastColorLevel = this._level;
-
     // 懒获取 Sprite 组件
     if (!this._sprite) {
       this._sprite = this.node.getComponent(Sprite);
@@ -97,6 +94,10 @@ export class Bullet extends Component {
     if (!this._sprite) return;
 
     const colorHex = this.color;
+    const colorKey = `${this._tierIndex}:${colorHex}`;
+    if (colorKey === this._lastColorKey) return;
+    this._lastColorKey = colorKey;
+
     const c = new Color().fromHEX(colorHex);
     this._sprite.color = c;
   }
@@ -147,10 +148,10 @@ export class Bullet extends Component {
   }
 
   /**
-   * 获取子弹等级
+   * 获取子弹基础武器档位索引
    */
   get level(): number {
-    return this._level;
+    return this._tierIndex;
   }
 
   /**
@@ -172,7 +173,7 @@ export class Bullet extends Component {
    */
   get color(): string {
     if (this._evolutionTint) return this._evolutionTint;
-    const idx = Math.min(this._level, GameConfig.bulletColors.length - 1);
+    const idx = Math.min(this._tierIndex, GameConfig.bulletColors.length - 1);
     return GameConfig.bulletColors[idx];
   }
 
@@ -222,11 +223,12 @@ export class Bullet extends Component {
    */
   reset(): void {
     this._dead = true;
+    this._tierIndex = 0;
     this._vx = 0;
     this._vy = 0;
     this._angle = 90;
     this._speedMult = 1.0;
-    this._lastColorLevel = -1;
+    this._lastColorKey = '';
     this._behavior = 'normal';
     this._explodeRadius = 0;
     this._splashMultiplier = 0;

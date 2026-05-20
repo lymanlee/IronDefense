@@ -33,7 +33,6 @@ export class Enemy extends Component {
   private _maxHp: number = 0;
   private _speed: number = 0;
   private _atk: number = 0;
-  private _expDrop: number = 0;
   private _waveNum: number = 1;
   private _lane: number = 0;
   private _enemyType: EnemyTypeId = 'normal';
@@ -154,9 +153,11 @@ export class Enemy extends Component {
     this._enemyTypeData = GameConfig.enemyTypes[enemyType] || GameConfig.enemyTypes.normal;
 
     if (col !== undefined && row !== undefined && totalCols !== undefined && totalRows !== undefined) {
-      this._x = x!;
-      const verticalSpacing = 50;
-      this._y = cfg.top + 30 + row * verticalSpacing;
+      const verticalSpacing = 6;
+      const horizontalJitter = 30;
+      const verticalJitter = 18;
+      this._x = x! + (Math.random() - 0.5) * horizontalJitter * 2;
+      this._y = cfg.top + 30 + row * verticalSpacing + (Math.random() - 0.5) * verticalJitter * 2;
     } else {
       const laneCount = cfg.laneCount;
       this._lane = Math.floor(Math.random() * laneCount);
@@ -169,7 +170,6 @@ export class Enemy extends Component {
     this._hp = this._maxHp;
     this._speed = Math.max(1, waveData.speed * this._enemyTypeData.speedMult);
     this._atk = Math.max(1, Math.round(waveData.atk * this._enemyTypeData.atkMult));
-    this._expDrop = Math.max(1, Math.round(waveData.exp * this._enemyTypeData.expMult));
     this._waveNum = waveNum;
 
     this._dead = false;
@@ -443,7 +443,6 @@ export class Enemy extends Component {
   get hp(): number { return this._hp; }
   get maxHp(): number { return this._maxHp; }
   get atk(): number { return this._atk; }
-  get expDrop(): number { return this._expDrop; }
   get reachedRail(): boolean { return this._reachedRail; }
   get waveNum(): number { return this._waveNum; }
   get x(): number { return this._x; }

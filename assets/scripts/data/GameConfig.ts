@@ -25,34 +25,46 @@ export const GameConfig = {
   },
 
   // ============================================
-  // 玩家武装车
+  // 玩家武装车与基础武器
   // ============================================
   car: {
     width: 106,        // 实际显示宽度（保持纵横比，统一画布）
     height: 112,      // 实际显示高度（含火焰特效）
     speed: 440,       // 键盘移动速度 px/s
     hp: 200,          // 血量
-  // ============================================
-  // 子弹发射模式（Lv1-Lv6）
-  // count: 发射方向数, spread: 相邻夹角(度), multiShot: 每方向连发数, speedMults: 每颗子弹速度倍率
-  // ============================================
-  firePatterns: [
-    { count: 3, spread: 7, multiShot: 1, speedMults: [1.0] },
-    { count: 4, spread: 7, multiShot: 1, speedMults: [1.0] },
-    { count: 5, spread: 7, multiShot: 1, speedMults: [1.0] },
-    { count: 5, spread: 7, multiShot: 2, speedMults: [1.0, 0.95] },
-    { count: 5, spread: 7, multiShot: 3, speedMults: [1.0, 0.95, 0.90] },
-    { count: 5, spread: 7, multiShot: 4, speedMults: [1.0, 0.95, 0.90, 0.85] },
-  ],
   },
 
   // ============================================
-  // 子弹
+  // 基础武器成长档案
+  // 说明：
+  // - baseSpreadCount: 基础并发数（补给会继续叠加并发）
+  // - baseBurstCount: 基础连发数（补给会继续叠加连发）
+  // - spreadAngle: 并发子弹之间的基础夹角
+  // - burstSpeedScales: 连发每段的速度差，用于形成视觉层次
+  // - speed / damage / fireRate: 仍保留按档位成长，但档位职责更接近“基础火力台阶”
+  // ============================================
+  weaponBase: {
+    profileNames: ['单发高速', '双发快射', '三发齐射', '三发双连', '四发三连', '五发四连'],
+    baseSpreadCount: [1, 2, 3, 3, 4, 5],
+    baseBurstCount: [1, 1, 1, 2, 3, 4],
+    spreadAngle: [0, 9, 9, 9, 9, 9],
+    burstSpeedScales: [
+      [1.0],
+      [1.0],
+      [1.0],
+      [1.0, 0.95],
+      [1.0, 0.95, 0.90],
+      [1.0, 0.95, 0.90, 0.85],
+    ],
+    speed: [4000, 4500, 5000, 5500, 6000, 6500],
+    damage: [10, 12, 14, 16, 19, 23],
+    fireRate: [9.0, 9.2, 9.4, 9.6, 9.8, 10.0],
+  },
+
+  // ============================================
+  // 子弹表现与碰撞
   // ============================================
   bullet: {
-    speed: [1000, 1100, 1200, 1300, 1400, 1500],    // 按等级
-    damage: [15, 25, 40, 60, 90, 130],         // 按等级（满级一枪一个）
-    fireRate: [3.5, 3.5, 4.0, 4.0, 4.5, 5.5], // 每秒发射次数 按等级
     radius: 8,                                  // 碰撞半径
   },
 
@@ -99,9 +111,9 @@ export const GameConfig = {
       tint: '#80d8ff',
     },
     shield: {
-      hpMult: 1.9,
-      speedMult: 0.7,
-      atkMult: 1.0,
+      hpMult: 2.6,
+      speedMult: 0.74,
+      atkMult: 1.1,
       expMult: 1.25,
       scale: 1.1,
       damageReduce: 0.35,
@@ -145,7 +157,7 @@ export const GameConfig = {
       tint: '#a5d6a7',
     },
     boss_bulldozer: {
-      hpMult: 4.6,
+      hpMult: 6.2,
       speedMult: 0.55,
       atkMult: 2.2,
       expMult: 3.2,
@@ -159,7 +171,7 @@ export const GameConfig = {
       tint: '#ffcc80',
     },
     boss_commander: {
-      hpMult: 6.2,
+      hpMult: 8.4,
       speedMult: 0.62,
       atkMult: 2.8,
       expMult: 4.2,
@@ -175,24 +187,25 @@ export const GameConfig = {
   },
 
   // ============================================
-  // 波次数值表（index=波次-1）
-  // 设计理念：大量敌人密集涌入，满级弹幕扫射的割草快感
+  // 基础波次模板（index=波次-1）
+  // 说明：
+  // - 当前主玩法优先使用 waveDefs + stages 做关卡编排
+  // - 这里保留为 fallback/debug 预览模板，避免调试界面和超出配置范围的波次失效
   // ============================================
   waves: [
-    { count: 30,  hp: 20,  speed: 20, atk: 4,  exp: 3, spawnInterval: 1.0 },
-    { count: 44,  hp: 30,  speed: 25, atk: 6,  exp: 4, spawnInterval: 1.0 },
-    { count: 60,  hp: 60,  speed: 25, atk: 8,  exp: 5, spawnInterval: 1.0 },
-    { count: 80,  hp: 120, speed: 30, atk: 11, exp: 6, spawnInterval: 1.0 },
-    { count: 100, hp: 120, speed: 30, atk: 15, exp: 8, spawnInterval: 1.0 },
+    { count: 30,  hp: 20,  speed: 20, atk: 4,  spawnInterval: 1.0 },
+    { count: 44,  hp: 30,  speed: 25, atk: 6,  spawnInterval: 1.0 },
+    { count: 60,  hp: 60,  speed: 25, atk: 8,  spawnInterval: 1.0 },
+    { count: 80,  hp: 120, speed: 30, atk: 11, spawnInterval: 1.0 },
+    { count: 100, hp: 120, speed: 30, atk: 15, spawnInterval: 1.0 },
   ],
 
-  // 第5波之后，每波的乘数
+  // 超出基础波次模板后的外推规则（fallback/debug 用）
   waveScaling: {
     countAdd: 12,     // 敌人数量增量
     hpMult: 1.20,     // HP倍率
     speedAdd: 0,      // 速度增量
     atkMult: 1.0,     // 攻击力倍率
-    expAdd: 2,        // 经验增量
     intervalMin: 0.1, // 最小生成间隔
   },
 
@@ -203,100 +216,135 @@ export const GameConfig = {
   waveDefs: [
     {
       kind: 'normal',
-      title: '试探推进',
+      title: '桥头试探',
+      spawnInterval: 0.01,
       entries: [
-        { type: 'normal', count: 24 },
+        { type: 'normal', count: 400 },
       ],
     },
     {
       kind: 'mixed',
       title: '快速接敌',
+      spawnInterval: 0.38,
       entries: [
-        { type: 'normal', count: 28 },
-        { type: 'runner', count: 6 },
-      ],
-    },
-    {
-      kind: 'pressure',
-      title: '冲锋压制',
-      entries: [
-        { type: 'normal', count: 24 },
-        { type: 'runner', count: 12 },
-      ],
-    },
-    {
-      kind: 'mixed',
-      title: '重甲前压',
-      entries: [
-        { type: 'normal', count: 24 },
-        { type: 'shield', count: 8 },
+        { type: 'normal', count: 55 },
         { type: 'runner', count: 8 },
       ],
     },
     {
-      kind: 'boss',
-      title: '装甲推土机',
-      spawnInterval: 0.85,
-      pauseTime: 7.5,
+      kind: 'mixed',
+      title: '护栏试压',
+      spawnInterval: 0.34,
       entries: [
-        { type: 'boss_bulldozer', count: 1 },
-        { type: 'runner', count: 10 },
+        { type: 'normal', count: 70 },
+        { type: 'runner', count: 16 },
+        { type: 'shield', count: 12 },
       ],
     },
     {
-      kind: 'resource',
-      title: '战场回收',
+      kind: 'pressure',
+      title: '装甲前压',
+      spawnInterval: 0.31,
       entries: [
-        { type: 'normal', count: 20 },
-        { type: 'runner', count: 10 },
+        { type: 'normal', count: 85 },
+        { type: 'runner', count: 22 },
+        { type: 'shield', count: 18 },
       ],
     },
-        {
-          kind: 'mixed',
-          title: '爆破试探',
-          entries: [
-            { type: 'normal', count: 30 },
-            { type: 'shield', count: 10 },
-            { type: 'suicide', count: 6 },
-          ],
-        },
-        {
-          kind: 'support',
-          title: '后排医护',
-          entries: [
-            { type: 'normal', count: 24 },
-            { type: 'shield', count: 8 },
-            { type: 'healer', count: 4 },
-          ],
-        },
-        {
-          kind: 'pressure',
-          title: '连环突击',
-          entries: [
-            { type: 'runner', count: 18 },
-        { type: 'shield', count: 8 },
-        { type: 'suicide', count: 8 },
+    {
+      kind: 'pressure',
+      title: '爆破试探',
+      spawnInterval: 0.28,
+      entries: [
+        { type: 'normal', count: 90 },
+        { type: 'runner', count: 24 },
+        { type: 'shield', count: 22 },
+        { type: 'suicide', count: 10 },
+      ],
+    },
+    {
+      kind: 'crisis',
+      title: '连环突击',
+      spawnInterval: 0.25,
+      entries: [
+        { type: 'normal', count: 100 },
+        { type: 'runner', count: 28 },
+        { type: 'shield', count: 28 },
+        { type: 'suicide', count: 14 },
+      ],
+    },
+    {
+      kind: 'support',
+      title: '后排医护',
+      spawnInterval: 0.23,
+      entries: [
+        { type: 'normal', count: 110 },
+        { type: 'runner', count: 30 },
+        { type: 'shield', count: 34 },
+        { type: 'suicide', count: 14 },
+        { type: 'healer', count: 8 },
+      ],
+    },
+    {
+      kind: 'crisis',
+      title: '交错冲锋',
+      spawnInterval: 0.21,
+      entries: [
+        { type: 'normal', count: 120 },
+        { type: 'runner', count: 34 },
+        { type: 'shield', count: 40 },
+        { type: 'suicide', count: 18 },
+        { type: 'healer', count: 10 },
       ],
     },
     {
       kind: 'crisis',
       title: '极限突破',
+      spawnInterval: 0.19,
       entries: [
-        { type: 'normal', count: 18 },
-        { type: 'runner', count: 16 },
-        { type: 'shield', count: 10 },
-        { type: 'suicide', count: 10 },
+        { type: 'normal', count: 130 },
+        { type: 'runner', count: 36 },
+        { type: 'shield', count: 48 },
+        { type: 'suicide', count: 20 },
+        { type: 'healer', count: 12 },
+      ],
+    },
+    {
+      kind: 'crisis',
+      title: '高压推进',
+      spawnInterval: 0.18,
+      entries: [
+        { type: 'normal', count: 140 },
+        { type: 'runner', count: 40 },
+        { type: 'shield', count: 58 },
+        { type: 'suicide', count: 24 },
+        { type: 'healer', count: 14 },
+      ],
+    },
+    {
+      kind: 'crisis',
+      title: '火力封锁',
+      spawnInterval: 0.16,
+      entries: [
+        { type: 'normal', count: 150 },
+        { type: 'runner', count: 44 },
+        { type: 'shield', count: 70 },
+        { type: 'suicide', count: 28 },
+        { type: 'healer', count: 16 },
       ],
     },
     {
       kind: 'boss',
       title: '指挥官战车',
-      spawnInterval: 0.75,
+      spawnInterval: 0.18,
       pauseTime: 8.0,
       entries: [
         { type: 'boss_commander', count: 1 },
-        { type: 'normal', count: 16 },
-        { type: 'runner', count: 12 },
+        { type: 'normal', count: 80 },
+        { type: 'runner', count: 20 },
+        { type: 'shield', count: 40 },
+        { type: 'suicide', count: 16 },
+        { type: 'healer', count: 10 },
       ],
     },
   ],
@@ -310,38 +358,19 @@ export const GameConfig = {
     {
       id: 'stage_1_1',
       label: '1-1',
-      name: '桥头试探',
+      name: '桥头防线',
       startWave: 1,
-      waveCount: 4,
-      rewardBonus: { coins: 30, parts: 0 },
-    },
-    {
-      id: 'stage_1_2',
-      label: '1-2',
-      name: '装甲前压',
-      startWave: 5,
-      waveCount: 3,
-      rewardBonus: { coins: 50, parts: 1 },
-    },
-    {
-      id: 'stage_1_3',
-      label: '1-3',
-      name: '极限突破',
-      startWave: 8,
-      waveCount: 3,
-      rewardBonus: { coins: 80, parts: 2 },
+      waveCount: 12,
+      rewardBonus: { coins: 120, parts: 3 },
+      enemyDensityByWave: [1.7, 1.95, 2.2, 2.5, 2.8, 3.1, 3.45, 3.8, 4.15, 4.5, 4.9, 4.2],
+      chestHpMultiplierByWave: [9, 12, 14, 16, 18, 21, 24, 27, 31, 36, 42, 48],
     },
   ],
 
   // ============================================
-  // 经验/等级表（index=0 对应 Lv1，目前配置的最高级值为6000，后面未配置的等级值为前一等级值的两倍）
-  // ============================================
-  expLevels: [0, 100, 700, 1500, 3000, 6000],
-
-  // ============================================
   // 波次间隔
   // ============================================
-  wavePauseTime: 6.0,  // 两波之间的休息秒数，兼容补给选择与广告入口
+  wavePauseTime: 3.0,  // 两波之间的休息秒数，兼容补给选择与广告入口
 
   // ============================================
   // 广告占位配置
@@ -403,48 +432,35 @@ export const GameConfig = {
       maxAdExtrasPerRun: 3,
       qualityBonusPerTier: 0.08,
       chest: {
-        minWave: 2,
-        maxActiveCount: 1,
-        maxSelectionsPerRun: 4,
-        baseSpawnDelay: 8,
-        delayVariance: 2.5,
-        radius: 34,
-        lowerY: 120,
-        upperY: 280,
-        speedMultiplier: 0.9,
-        attackMultiplier: 1.15,
-        attackRateMultiplier: 0.85,
+        minWave: 1,
+        maxActiveCount: 5,
+        maxSelectionsPerRun: 9,
+        baseSpawnDelay: 3.2,
+        delayVariance: 0,
+        radius: 58,
+        lowerY: 0,
+        upperY: 0,
+        speedMultiplier: 130,
+        attackMultiplier: 0,
+        attackRateMultiplier: 0,
         hpMultiplier: {
-          normal: 10,
-          elite: 14,
-          rare: 18,
+          normal: 1,
+          elite: 1,
+          rare: 1,
         },
+        laneIndex: 0,
+        enemyStartLaneIndex: 1,
+        capacity: 5,
+        slotGap: 26,
+        topOffset: 24,
+        stopRatio: 0.75,
+        refillDelay: 0.45,
+        baseHpFactor: 9.5,
+        waveGrowth: 0.16,
+        serialGrowth: 0.18,
+        phaseThresholds: [2, 5],
       },
       options: [
-        {
-          id: 'repair_small',
-          title: '战地包扎',
-          desc: '立即恢复40点耐久',
-          assetKey: 'icon_supply_repair_small',
-          assetBrief: '浅红医疗包、绷带与十字标记，可做64x64图标',
-          effect: { type: 'heal', value: 40 },
-        },
-        {
-          id: 'repair',
-          title: '紧急维修',
-          desc: '立即恢复70点耐久',
-          assetKey: 'icon_supply_repair',
-          assetBrief: '红色修理箱、扳手、加号，可做64x64图标',
-          effect: { type: 'heal', value: 70 },
-        },
-        {
-          id: 'max_hp_up',
-          title: '强化底盘',
-          desc: '最大生命+25，并立即恢复25点',
-          assetKey: 'icon_supply_max_hp',
-          assetBrief: '加厚装甲板、铆钉、金属光泽，可做64x64图标',
-          effect: { type: 'heal', value: 25 },
-        },
         {
           id: 'damage_boost',
           title: '高爆弹药',
@@ -470,12 +486,20 @@ export const GameConfig = {
           effect: { type: 'fireRateMultiplier', value: 1.35 },
         },
         {
-          id: 'shield',
-          title: '临时装甲',
-          desc: '立即获得3秒护盾，后续波次开局护盾时长也可叠加',
-          assetKey: 'icon_supply_shield',
-          assetBrief: '车体护盾、蓝白能量罩，可做64x64图标',
-          effect: { type: 'shield', seconds: 3 },
+          id: 'multishot_up',
+          title: '追击连发',
+          desc: '本关每轮额外连发1次，可叠加',
+          assetKey: 'icon_supply_multishot',
+          assetBrief: '双层弹链、连续曳光轨迹，可做64x64图标',
+          effect: { type: 'multiShotAdd', value: 1 },
+        },
+        {
+          id: 'spread_count_up',
+          title: '并列弹幕',
+          desc: '本关并发弹道+1，可叠加',
+          assetKey: 'icon_supply_spread_count',
+          assetBrief: '多重并列炮口、扇形火线，可做64x64图标',
+          effect: { type: 'spreadCountAdd', value: 1 },
         },
         {
           id: 'knockback_round',
@@ -494,36 +518,36 @@ export const GameConfig = {
           effect: { type: 'slow', value: 0.8 },
         },
         {
-          id: 'bonus_coins',
-          title: '战场回收',
-          desc: '本局结算金币+25%',
-          assetKey: 'icon_supply_bonus_coins',
-          assetBrief: '金币堆、磁铁与拾取箭头，可做64x64图标',
-          effect: { type: 'bonusCoins', value: 1.25 },
+          id: 'explode_radius_up',
+          title: '震爆扩散',
+          desc: '爆裂范围提升18%，偏向爆裂流派',
+          assetKey: 'icon_supply_explode_radius',
+          assetBrief: '橙色爆圈、外扩碎片，可做64x64图标',
+          effect: { type: 'explodeRadiusMultiplier', value: 1.18 },
         },
         {
-          id: 'bonus_parts',
-          title: '零件搜集',
-          desc: '本局结算额外+1零件',
-          assetKey: 'icon_supply_bonus_parts',
-          assetBrief: '齿轮、螺栓与金属碎片，可做64x64图标',
-          effect: { type: 'bonusParts', value: 1 },
+          id: 'pierce_up',
+          title: '穿甲串列',
+          desc: '穿透次数+1，偏向穿透流派',
+          assetKey: 'icon_supply_pierce_up',
+          assetBrief: '蓝色贯穿弹道、残影，可做64x64图标',
+          effect: { type: 'pierceAdd', value: 1 },
         },
         {
-          id: 'extra_supply_choices',
-          title: '补给扩容',
-          desc: '下次补给额外多1个候选',
-          assetKey: 'icon_supply_extra_choices',
-          assetBrief: '多张补给卡、加号与光晕，可做64x64图标',
-          effect: { type: 'extraSupplyChoices', value: 1 },
+          id: 'chain_up',
+          title: '电弧增幅',
+          desc: '电弧链数+1，偏向电弧流派',
+          assetKey: 'icon_supply_chain_up',
+          assetBrief: '紫色闪电链、能量线圈，可做64x64图标',
+          effect: { type: 'chainAdd', value: 1 },
         },
         {
-          id: 'extra_ad_supply',
-          title: '额外军援',
-          desc: '本局额外补给广告次数+1',
-          assetKey: 'icon_supply_extra_ad',
-          assetBrief: '空投箱、信标与无线电波纹，可做64x64图标',
-          effect: { type: 'extraAdSupply', value: 1 },
+          id: 'chain_range_up',
+          title: '电容外放',
+          desc: '电弧链距提升18%，偏向电弧流派',
+          assetKey: 'icon_supply_chain_range',
+          assetBrief: '放电半径、紫蓝脉冲圈，可做64x64图标',
+          effect: { type: 'chainRangeMultiplier', value: 1.18 },
         },
       ],
     },
@@ -626,6 +650,18 @@ export const GameConfig = {
         valueSuffix: '%伤害',
       },
       {
+        id: 'weapon_tier',
+        title: '火控核心',
+        desc: '永久提升开局基础武器档位',
+        currency: 'parts',
+        maxLevel: 5,
+        costBase: 3,
+        costStep: 3,
+        valueBase: 1,
+        valueStep: 1,
+        valueSuffix: '档位',
+      },
+      {
         id: 'starting_coins',
         title: '战备基金',
         desc: '每局结算时额外获得金币',
@@ -679,11 +715,6 @@ export const GameConfig = {
   },
 
   // ============================================
-  // 武器名称（中英对照）
-  // ============================================
-  weaponNames: ['三连', '四连', '五连', '五连双发', '五连三发', '五连四发'],
-
-  // ============================================
   // 敌人颜色方案（按波次循环）
   // ============================================
   enemyColors: [
@@ -695,7 +726,8 @@ export const GameConfig = {
   ],
 
   // ============================================
-  // 子弹颜色（按等级）
+  // 子弹默认颜色（按基础武器档位）
+  // 若已获得武器分支，则优先使用分支 tint 覆盖
   // ============================================
   bulletColors: ['#ffe94d', '#ffb300', '#ff7043', '#e040fb', '#40c4ff', '#ff4081'],
 
@@ -711,7 +743,6 @@ export interface WaveData {
   hp: number;
   speed: number;
   atk: number;
-  exp: number;
   spawnInterval: number;
 }
 
@@ -771,11 +802,14 @@ export interface SupplyOptionData {
   desc: string;
   assetKey: string;
   assetBrief: string;
+  phase?: 'early' | 'mid' | 'late';
   effect: {
     type:
       | 'heal'
       | 'damageMultiplier'
       | 'fireRateMultiplier'
+      | 'multiShotAdd'
+      | 'spreadCountAdd'
       | 'shield'
       | 'knockback'
       | 'slow'
@@ -783,6 +817,10 @@ export interface SupplyOptionData {
       | 'bonusParts'
       | 'extraSupplyChoices'
       | 'extraAdSupply'
+      | 'explodeRadiusMultiplier'
+      | 'pierceAdd'
+      | 'chainAdd'
+      | 'chainRangeMultiplier'
       | 'weaponEvolution';
     value?: number;
     waves?: number;
@@ -811,6 +849,17 @@ export interface SupplyChestConfigData {
   attackMultiplier: number;
   attackRateMultiplier: number;
   hpMultiplier: Record<SupplyChestQuality, number>;
+  laneIndex?: number;
+  enemyStartLaneIndex?: number;
+  capacity?: number;
+  slotGap?: number;
+  topOffset?: number;
+  stopRatio?: number;
+  refillDelay?: number;
+  baseHpFactor?: number;
+  waveGrowth?: number;
+  serialGrowth?: number;
+  phaseThresholds?: number[];
 }
 
 export interface StageRewardBonusData {
@@ -825,6 +874,8 @@ export interface StageDefData {
   startWave: number;
   waveCount: number;
   rewardBonus: StageRewardBonusData;
+  enemyDensityByWave?: number[];
+  chestHpMultiplierByWave?: number[];
 }
 
 export type WeaponBehavior = 'normal' | 'explode' | 'pierce' | 'chain';
@@ -852,6 +903,7 @@ export type UpgradeCurrency = 'coins' | 'parts';
 export type PermanentUpgradeId =
   | 'car_hp'
   | 'car_attack'
+  | 'weapon_tier'
   | 'starting_coins'
   | 'revive_bonus'
   | 'supply_quality'

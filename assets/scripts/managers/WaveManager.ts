@@ -34,6 +34,7 @@ export class WaveManager {
   private _spawnPlan: WaveSpawnEntryData[] = [];
   private _activeWaveDef: WaveDefinitionData | null = null;
   private _activeWaveData: WaveData | null = null;
+  private _densityProvider: ((waveIndex: number) => number) | null = null;
 
   constructor() {}
 
@@ -42,6 +43,10 @@ export class WaveManager {
    */
   setEnemyFactory(factory: () => Enemy): void {
     this._enemyFactory = factory;
+  }
+
+  setDensityProvider(provider: (waveIndex: number) => number): void {
+    this._densityProvider = provider;
   }
 
   get currentWaveNum(): number {
@@ -94,7 +99,6 @@ export class WaveManager {
       hp: Math.round(base.hp * Math.pow(s.hpMult, extra)),
       speed: base.speed + s.speedAdd * extra,
       atk: Math.round(base.atk * Math.pow(s.atkMult, extra)),
-      exp: base.exp + s.expAdd * extra,
       spawnInterval: Math.max(s.intervalMin, base.spawnInterval - 0.05 * extra),
     };
   }
@@ -102,9 +106,10 @@ export class WaveManager {
   getWaveDefinition(index: number): WaveDefinitionData {
     if (index < GameConfig.waveDefs.length) {
       const waveDef = GameConfig.waveDefs[index];
+      const density = Math.max(0.1, this._densityProvider?.(index) || 1);
       const entries: WaveSpawnEntryData[] = waveDef.entries.map((entry) => ({
         type: entry.type as EnemyTypeId,
-        count: entry.count,
+        count: Math.max(1, Math.round(entry.count * density)),
       }));
       return {
         ...waveDef,
@@ -115,27 +120,28 @@ export class WaveManager {
 
     const data = this.getWaveData(index);
     const loop = index % 5;
+    const density = Math.max(0.1, this._densityProvider?.(index) || 1);
     const entries: WaveSpawnEntryData[] = [];
 
     if (loop === 0) {
-      entries.push({ type: 'normal' as EnemyTypeId, count: Math.max(12, Math.floor(data.count * 0.6)) });
-      entries.push({ type: 'runner' as EnemyTypeId, count: Math.max(8, Math.floor(data.count * 0.4)) });
+      entries.push({ type: 'normal' as EnemyTypeId, count: Math.max(12, Math.floor(data.count * 0.6 * density)) });
+      entries.push({ type: 'runner' as EnemyTypeId, count: Math.max(8, Math.floor(data.count * 0.4 * density)) });
     } else if (loop === 1) {
-      entries.push({ type: 'normal' as EnemyTypeId, count: Math.max(16, Math.floor(data.count * 0.55)) });
-      entries.push({ type: 'shield' as EnemyTypeId, count: Math.max(6, Math.floor(data.count * 0.2)) });
-      entries.push({ type: 'runner' as EnemyTypeId, count: Math.max(8, Math.floor(data.count * 0.25)) });
+      entries.push({ type: 'normal' as EnemyTypeId, count: Math.max(16, Math.floor(data.count * 0.55 * density)) });
+      entries.push({ type: 'shield' as EnemyTypeId, count: Math.max(6, Math.floor(data.count * 0.2 * density)) });
+      entries.push({ type: 'runner' as EnemyTypeId, count: Math.max(8, Math.floor(data.count * 0.25 * density)) });
     } else if (loop === 2) {
-      entries.push({ type: 'normal' as EnemyTypeId, count: Math.max(16, Math.floor(data.count * 0.45)) });
-      entries.push({ type: 'runner' as EnemyTypeId, count: Math.max(10, Math.floor(data.count * 0.35)) });
-      entries.push({ type: 'suicide' as EnemyTypeId, count: Math.max(6, Math.floor(data.count * 0.2)) });
+      entries.push({ type: 'normal' as EnemyTypeId, count: Math.max(16, Math.floor(data.count * 0.45 * density)) });
+      entries.push({ type: 'runner' as EnemyTypeId, count: Math.max(10, Math.floor(data.count * 0.35 * density)) });
+      entries.push({ type: 'suicide' as EnemyTypeId, count: Math.max(6, Math.floor(data.count * 0.2 * density)) });
     } else if (loop === 3) {
-      entries.push({ type: 'shield' as EnemyTypeId, count: Math.max(10, Math.floor(data.count * 0.35)) });
-      entries.push({ type: 'runner' as EnemyTypeId, count: Math.max(10, Math.floor(data.count * 0.35)) });
-      entries.push({ type: 'suicide' as EnemyTypeId, count: Math.max(8, Math.floor(data.count * 0.3)) });
+      entries.push({ type: 'shield' as EnemyTypeId, count: Math.max(10, Math.floor(data.count * 0.35 * density)) });
+      entries.push({ type: 'runner' as EnemyTypeId, count: Math.max(10, Math.floor(data.count * 0.35 * density)) });
+      entries.push({ type: 'suicide' as EnemyTypeId, count: Math.max(8, Math.floor(data.count * 0.3 * density)) });
     } else {
       entries.push({ type: 'boss_bulldozer' as EnemyTypeId, count: 1 });
-      entries.push({ type: 'runner' as EnemyTypeId, count: Math.max(10, Math.floor(data.count * 0.28)) });
-      entries.push({ type: 'shield' as EnemyTypeId, count: Math.max(8, Math.floor(data.count * 0.18)) });
+      entries.push({ type: 'runner' as EnemyTypeId, count: Math.max(10, Math.floor(data.count * 0.28 * density)) });
+      entries.push({ type: 'shield' as EnemyTypeId, count: Math.max(8, Math.floor(data.count * 0.18 * density)) });
     }
 
     return {
@@ -148,47 +154,13 @@ export class WaveManager {
   }
 
   /**
-   * 生成对称布局（固定8个槽位）
-   * 8人：8槽全满 [1,1,1,1,1,1,1,1]
-   * 6人：两边各3人，中间空2个 [1,1,1,0,0,1,1,1]
-   * 4人：两边各2人，中间空4个 [1,1,0,0,0,0,1,1]
-   * @param count 每行人数（4/6/8）
-   * @returns 布局数组（8个元素）
-   */
-  private _generateSymmetricLayout(count: number): number[] {
-    const slots = 8;  // 固定8个槽位
-    const layout: number[] = new Array(slots).fill(0);
-
-    if (count === 8) {
-      // 全部放人
-      for (let i = 0; i < 8; i++) layout[i] = 1;
-    } else if (count === 6) {
-      // 两边各3人，中间空2个
-      // 位置: 0,1,2 放人；3,4 空；5,6,7 放人
-      layout[0] = 1; layout[1] = 1; layout[2] = 1;
-      layout[5] = 1; layout[6] = 1; layout[7] = 1;
-    } else if (count === 4) {
-      // 两边各2人，中间空4个
-      // 位置: 0,1 放人；2,3,4,5 空；6,7 放人
-      layout[0] = 1; layout[1] = 1;
-      layout[6] = 1; layout[7] = 1;
-    }
-
-    return layout;
-  }
-
-  /**
    * 计算队列布局
    * @param total 总敌人数
    * @returns 布局、行数
    */
   private _calcFormation(total: number): { layout: number[], rows: number } {
-    // 随机每行人数：4、6、8（偶数）
-    const counts = [4, 6, 8];
-    const rowCount = counts[Math.floor(Math.random() * counts.length)];
-    // 生成对称布局
-    const layout = this._generateSymmetricLayout(rowCount);
-    // 计算总行数
+    const rowCount = 8;
+    const layout = new Array(rowCount).fill(1);
     const rows = Math.ceil(total / rowCount);
     return { layout, rows };
   }
@@ -277,13 +249,19 @@ export class WaveManager {
     if (this._spawnPlan.length === 0) return;
 
     const cfg = GameConfig.bridge;
+    const chestCfg = GameConfig.gameplay.supply.chest || {};
     const layout = this._layout;
     const currentRow = this._currentRow;
     const totalRows = this._totalRows;
     const totalSlots = layout.length;  // 固定8个槽位
 
-    // 槽位宽度（根据布局元素数量）
-    const slotWidth = (cfg.right - cfg.left) / (totalSlots + 1);
+    const laneCount = Math.max(1, cfg.laneCount);
+    const bridgeWidth = cfg.right - cfg.left;
+    const laneWidth = bridgeWidth / laneCount;
+    const reservedLaneIndex = Math.max(0, Math.min(laneCount - 1, chestCfg.enemyStartLaneIndex || 1));
+    const enemyLeft = cfg.left + laneWidth * reservedLaneIndex;
+    const enemyWidth = Math.max(bridgeWidth * 0.5, cfg.right - enemyLeft);
+    const slotWidth = enemyWidth / (totalSlots + 1);
 
     // 遍历布局生成敌人
     for (let slotIndex = 0; slotIndex < layout.length; slotIndex++) {
@@ -291,7 +269,7 @@ export class WaveManager {
       if (count === 0) continue;  // 空位跳过
 
       // 计算这个槽位的x坐标
-      const x = cfg.left + slotWidth * (slotIndex + 1);
+      const x = enemyLeft + slotWidth * (slotIndex + 1);
 
       // 生成这个位置的敌人（每个槽位1个）
       for (let i = 0; i < count; i++) {
@@ -367,5 +345,6 @@ export class WaveManager {
     this._spawnPlan = [];
     this._activeWaveDef = null;
     this._activeWaveData = null;
+    this._densityProvider = null;
   }
 }

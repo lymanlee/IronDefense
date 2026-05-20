@@ -1,6 +1,6 @@
 /**
  * DebugScreen.ts - 调试模式界面
- * 支持调整起始波次和武器等级
+ * 支持调整起始波次和基础武器档位
  */
 
 import { _decorator, Component, Node, Label, Button } from 'cc';
@@ -28,12 +28,13 @@ export class DebugScreen extends Component {
 
   // 当前值
   private _wave: number = 1;
-  private _level: number = 1;
+  private _tier: number = 1;
   private _evolution: WeaponEvolutionId | 'none' = 'none';
 
   // 回调
-  private _onConfirm: ((wave: number, level: number, evolution: WeaponEvolutionId | 'none') => void) | null = null;
+  private _onConfirm: ((wave: number, tier: number, evolution: WeaponEvolutionId | 'none') => void) | null = null;
   private _onBack: (() => void) | null = null;
+  private _onResetProgress: (() => void) | null = null;
 
   start(): void {
     this._updateDisplay();
@@ -42,7 +43,7 @@ export class DebugScreen extends Component {
   /**
    * 设置确认回调
    */
-  setOnConfirm(callback: (wave: number, level: number, evolution: WeaponEvolutionId | 'none') => void): void {
+  setOnConfirm(callback: (wave: number, tier: number, evolution: WeaponEvolutionId | 'none') => void): void {
     this._onConfirm = callback;
   }
 
@@ -51,6 +52,10 @@ export class DebugScreen extends Component {
    */
   setOnBack(callback: () => void): void {
     this._onBack = callback;
+  }
+
+  setOnResetProgress(callback: () => void): void {
+    this._onResetProgress = callback;
   }
 
   // ==================== 波次调整 ====================
@@ -65,20 +70,20 @@ export class DebugScreen extends Component {
     this._updateDisplay();
   }
 
-  // ==================== 等级调整 ====================
+  // ==================== 档位调整 ====================
 
-  onLevelMinus(): void {
-    if (this._level > 1) {
-      this._level = Math.max(1, this._level - 1);
+  onTierMinus(): void {
+    if (this._tier > 1) {
+      this._tier = Math.max(1, this._tier - 1);
     } else {
       this._cycleEvolution(-1);
     }
     this._updateDisplay();
   }
 
-  onLevelPlus(): void {
-    if (this._level < 6) {
-      this._level = Math.min(6, this._level + 1);
+  onTierPlus(): void {
+    if (this._tier < 6) {
+      this._tier = Math.min(6, this._tier + 1);
     } else {
       this._cycleEvolution(1);
     }
@@ -89,13 +94,19 @@ export class DebugScreen extends Component {
 
   onConfirm(): void {
     if (this._onConfirm) {
-      this._onConfirm(this._wave, this._level, this._evolution);
+      this._onConfirm(this._wave, this._tier, this._evolution);
     }
   }
 
   onBack(): void {
     if (this._onBack) {
       this._onBack();
+    }
+  }
+
+  onResetProgress(): void {
+    if (this._onResetProgress) {
+      this._onResetProgress();
     }
   }
 
@@ -117,7 +128,7 @@ export class DebugScreen extends Component {
     }
 
     if (this.levelValueLabel) {
-      this.levelValueLabel.string = `Lv${this._level}`;
+      this.levelValueLabel.string = `档位${this._tier}`;
     }
 
     if (this.evolutionValueLabel) {
@@ -132,9 +143,9 @@ export class DebugScreen extends Component {
 
     // 更新武器预览
     if (this.weaponPreviewLabel) {
-      const idx = Math.min(this._level - 1, GameConfig.bullet.damage.length - 1);
-      const tip = this._level >= GameConfig.gameplay.weaponEvolution.unlockLevel ? '\nLv边界继续 +/- 可切换分支' : '';
-      this.weaponPreviewLabel.string = `炮: ${GameConfig.weaponNames[idx]}  伤害: ${GameConfig.bullet.damage[idx]}\n分支: ${this._getEvolutionLabel()}${tip}`;
+      const idx = Math.min(this._tier - 1, GameConfig.weaponBase.damage.length - 1);
+      const tip = this._tier >= GameConfig.gameplay.weaponEvolution.unlockLevel ? '\n档位到顶后继续 +/- 可切换分支' : '';
+      this.weaponPreviewLabel.string = `炮: ${GameConfig.weaponBase.profileNames[idx]}  伤害: ${GameConfig.weaponBase.damage[idx]}\n分支: ${this._getEvolutionLabel()}${tip}`;
     }
   }
 
@@ -157,9 +168,15 @@ export class DebugScreen extends Component {
     }
   }
 
-  private _getWaveData(index: number): { count: number; hp: number; speed: number; atk: number; exp: number } {
+  private _getWaveData(index: number): { count: number; hp: number; speed: number; atk: number } {
     if (index <= GameConfig.waves.length) {
-      return { ...GameConfig.waves[index - 1] };
+      const wave = GameConfig.waves[index - 1];
+      return {
+        count: wave.count,
+        hp: wave.hp,
+        speed: wave.speed,
+        atk: wave.atk,
+      };
     }
 
     const base = GameConfig.waves[GameConfig.waves.length - 1];
@@ -171,7 +188,6 @@ export class DebugScreen extends Component {
       hp: Math.round(base.hp * Math.pow(s.hpMult, extra)),
       speed: base.speed + s.speedAdd * extra,
       atk: Math.round(base.atk * Math.pow(s.atkMult, extra)),
-      exp: base.exp + s.expAdd * extra,
     };
   }
 }

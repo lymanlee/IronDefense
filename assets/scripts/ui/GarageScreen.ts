@@ -63,6 +63,7 @@ export class GarageScreen extends Component {
     const bonus = progress.getPermanentBonuses();
     if (this.summaryLabel) {
       this.summaryLabel.string = [
+        `武器档位 ${bonus.baseWeaponTier}`,
         `耐久 +${bonus.carHpFlat}`,
         `伤害 +${Math.round((bonus.carDamageMultiplier - 1) * 100)}%`,
         `开局金币 +${bonus.startingCoins}`,
@@ -118,6 +119,7 @@ export class GarageScreen extends Component {
 
   onUpgradeCarHp(): void { this._handleUpgrade('car_hp'); }
   onUpgradeCarAttack(): void { this._handleUpgrade('car_attack'); }
+  onUpgradeWeaponTier(): void { this._handleUpgrade('weapon_tier'); }
   onUpgradeStartingCoins(): void { this._handleUpgrade('starting_coins'); }
   onUpgradeReviveBonus(): void { this._handleUpgrade('revive_bonus'); }
   onUpgradeSupplyQuality(): void { this._handleUpgrade('supply_quality'); }
@@ -135,6 +137,7 @@ export class GarageScreen extends Component {
     this._rows = [
       this._makeRow('car_hp', 'UpgradeCarHpRow'),
       this._makeRow('car_attack', 'UpgradeCarAttackRow'),
+      this._makeRow('weapon_tier', 'UpgradeWeaponTierRow'),
       this._makeRow('starting_coins', 'UpgradeStartingCoinsRow'),
       this._makeRow('revive_bonus', 'UpgradeReviveBonusRow'),
       this._makeRow('supply_quality', 'UpgradeSupplyQualityRow'),
@@ -160,6 +163,8 @@ export class GarageScreen extends Component {
     switch (config.id) {
       case 'car_attack':
         return `当前加成: +${Math.round(config.value * 100)}${config.valueSuffix}`;
+      case 'weapon_tier':
+        return `当前加成: 开局档位 ${Math.round(config.value)}`;
       case 'revive_bonus':
         return `当前加成: +${Math.round(config.value * 100)}${config.valueSuffix} / +${config.extraValue.toFixed(1)}秒护盾`;
       case 'supply_quality':
