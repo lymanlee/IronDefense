@@ -2647,7 +2647,7 @@ export class GameManager extends Component {
     const canNext = this._currentStageIndex < this._progressManager.unlockedStageIndex && this._currentStageIndex < stageDefs.length - 1;
     startScreen.updateStageInfo({
       eyebrow: '当前作战关卡',
-      code: stage.label || `第${this._currentStageIndex + 1}关`,
+      code: '',
       name: stage.name,
       waveText: `${stage.waveCount} 波`,
       rewardText: `金币 +${stage.rewardBonus.coins}`,

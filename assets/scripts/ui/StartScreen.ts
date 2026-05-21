@@ -95,12 +95,24 @@ export class StartScreen extends Component {
   updateStageInfo(data: StartStageDisplayData): void {
     this._ensureStageRefs();
     if (this.stageTitleLabel) this.stageTitleLabel.string = data.eyebrow;
-    if (this.stageCodeLabel) this.stageCodeLabel.string = data.code;
+    if (this.stageCodeLabel) {
+      this.stageCodeLabel.string = data.code;
+      this.stageCodeLabel.node.active = data.code.trim().length > 0;
+    }
     if (this.stageNameLabel) this.stageNameLabel.string = data.name;
-    if (this.stageWaveLabel) this.stageWaveLabel.string = data.waveText;
-    if (this.stageRewardLabel) this.stageRewardLabel.string = data.rewardText;
-    if (this.stagePartsLabel) this.stagePartsLabel.string = data.partsText;
-    if (this.stageHintLabel) this.stageHintLabel.string = data.hintText;
+    if (this.stageWaveLabel) {
+      this.stageWaveLabel.string = data.waveText;
+    }
+    if (this.stageRewardLabel) {
+      this.stageRewardLabel.string = data.rewardText;
+    }
+    if (this.stagePartsLabel) {
+      this.stagePartsLabel.string = data.partsText;
+    }
+    if (this.stageHintLabel) {
+      this.stageHintLabel.string = data.hintText;
+      this.stageHintLabel.node.active = data.hintText.trim().length > 0;
+    }
 
     // Fallback for older scene layouts before the richer stage card nodes exist.
     if (this.stageValueLabel && !this.stageCodeLabel && !this.stageNameLabel) {

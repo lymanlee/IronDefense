@@ -3,7 +3,7 @@
  * 展示长期资源、永久升级项，并提供升级与返回入口
  */
 
-import { _decorator, Button, Color, Component, Label, Node, Sprite } from 'cc';
+import { _decorator, Button, Color, Component, Label, Node } from 'cc';
 import { PermanentUpgradeConfig, PermanentUpgradeId } from '../data/GameConfig';
 import { ProgressManager } from '../managers/ProgressManager';
 
@@ -50,6 +50,7 @@ export class GarageScreen extends Component {
   refresh(): void {
     const progress = ProgressManager.instance;
     const panel = this.node.getChildByName('Panel');
+    const rows = this._rows.length > 0 ? this._rows : this._cacheRows();
     this.coinsLabel = this.coinsLabel || panel?.getChildByName('TopBar')?.getChildByName('CoinsLabel')?.getComponent(Label) || null;
     this.partsLabel = this.partsLabel || panel?.getChildByName('TopBar')?.getChildByName('PartsLabel')?.getComponent(Label) || null;
     this.summaryLabel = this.summaryLabel || panel?.getChildByName('SummaryLabel')?.getComponent(Label) || null;
@@ -63,22 +64,18 @@ export class GarageScreen extends Component {
     const bonus = progress.getPermanentBonuses();
     if (this.summaryLabel) {
       this.summaryLabel.string = [
-        `武器档位 ${bonus.baseWeaponTier}`,
-        `耐久 +${bonus.carHpFlat}`,
-        `伤害 +${Math.round((bonus.carDamageMultiplier - 1) * 100)}%`,
-        `开局金币 +${bonus.startingCoins}`,
-        `复活增益 +${Math.round(bonus.reviveHpBonusRatio * 100)}%`,
-      ].join('  |  ');
+        `耐久 +${bonus.carHpFlat}  |  伤害 +${Math.round((bonus.carDamageMultiplier - 1) * 100)}%  |  开局档位 ${bonus.baseWeaponTier}`,
+        `开局金币 +${bonus.startingCoins}  |  复活增益 +${Math.round(bonus.reviveHpBonusRatio * 100)}%`,
+      ].join('\n');
     }
 
-    const rows = this._rows.length > 0 ? this._rows : this._cacheRows();
     const allStates = progress.getAllUpgradeStates();
     rows.forEach((row) => {
       const state = allStates.find(item => item.id === row.id);
       if (!state) return;
 
       if (row.levelLabel) {
-        row.levelLabel.string = `${state.title}  Lv${state.level}/${state.maxLevel}`;
+        row.levelLabel.string = `${state.title} · Lv ${state.level}/${state.maxLevel}`;
       }
       if (row.descLabel) {
         row.descLabel.string = state.desc;
@@ -89,24 +86,19 @@ export class GarageScreen extends Component {
       if (row.costLabel) {
         row.costLabel.string = state.isMaxLevel
           ? '已满级'
-          : `升级消耗: ${state.nextCost} ${state.currency === 'coins' ? '金币' : '零件'}`;
+          : `${state.currency === 'coins' ? '金币' : '零件'} ${state.nextCost}`;
+        row.costLabel.color = state.isMaxLevel
+          ? new Color(133, 150, 166, 255)
+          : this._getCurrencyColor(state.currency);
       }
 
       const enabled = !state.isMaxLevel && progress.canUpgrade(state.id);
       if (row.buttonNode) {
         const button = row.buttonNode.getComponent(Button);
-        if (button) button.interactable = !state.isMaxLevel;
-        const sprite = row.buttonNode.getComponent(Sprite);
-        if (sprite) {
-          sprite.color = state.isMaxLevel
-            ? new Color(110, 110, 120, 255)
-            : enabled
-              ? new Color(255, 179, 0, 255)
-              : new Color(96, 125, 139, 255);
-        }
+        if (button) button.interactable = enabled;
       }
       if (row.buttonLabel) {
-        row.buttonLabel.string = state.isMaxLevel ? '满级' : enabled ? '升级' : '资源不足';
+        row.buttonLabel.string = state.isMaxLevel ? '满级' : enabled ? '升级' : '不足';
       }
     });
   }
@@ -162,15 +154,21 @@ export class GarageScreen extends Component {
   private _formatUpgradeValue(config: PermanentUpgradeConfig & { value: number; extraValue: number }): string {
     switch (config.id) {
       case 'car_attack':
-        return `当前加成: +${Math.round(config.value * 100)}${config.valueSuffix}`;
+        return `当前: +${Math.round(config.value * 100)}${config.valueSuffix}`;
       case 'weapon_tier':
-        return `当前加成: 开局档位 ${Math.round(config.value)}`;
+        return `当前: 开局档位 ${Math.round(config.value)}`;
       case 'revive_bonus':
-        return `当前加成: +${Math.round(config.value * 100)}${config.valueSuffix} / +${config.extraValue.toFixed(1)}秒护盾`;
+        return `当前: +${Math.round(config.value * 100)}${config.valueSuffix} / +${config.extraValue.toFixed(1)}秒护盾`;
       case 'supply_quality':
-        return `当前加成: 品质等级 +${Math.round(config.value)}`;
+        return `当前: 品质等级 +${Math.round(config.value)}`;
       default:
-        return `当前加成: +${Math.round(config.value)}${config.valueSuffix}`;
+        return `当前: +${Math.round(config.value)}${config.valueSuffix}`;
     }
+  }
+
+  private _getCurrencyColor(currency: 'coins' | 'parts'): Color {
+    return currency === 'coins'
+      ? new Color(255, 220, 138, 255)
+      : new Color(154, 224, 255, 255);
   }
 }

@@ -28,6 +28,7 @@ export class AdsManager {
 
   private _root: Node | null = null;
   private _bannerNode: Node | null = null;
+  private _ownsBannerNode: boolean = false;
   private _activeAdNode: Node | null = null;
   private _lastInterstitialAt: number = -Infinity;
   private _runStartedAt: number = 0;
@@ -81,6 +82,15 @@ export class AdsManager {
     }
 
     this.hideBanner();
+    const configuredNode = this._findConfiguredBannerNode(placement);
+    if (configuredNode) {
+      this._bannerNode = configuredNode;
+      this._ownsBannerNode = false;
+      this._applyBannerLabel(configuredNode, placement);
+      configuredNode.active = true;
+      return;
+    }
+
     const root = this._getRoot();
     if (!root) return;
 
@@ -104,13 +114,19 @@ export class AdsManager {
 
     root.addChild(banner);
     this._bannerNode = banner;
+    this._ownsBannerNode = true;
   }
 
   hideBanner(): void {
     if (this._bannerNode?.isValid) {
-      this._bannerNode.destroy();
+      if (this._ownsBannerNode) {
+        this._bannerNode.destroy();
+      } else {
+        this._bannerNode.active = false;
+      }
     }
     this._bannerNode = null;
+    this._ownsBannerNode = false;
   }
 
   private async _showWechatRewarded(adUnitId: string): Promise<boolean> {
@@ -207,6 +223,56 @@ export class AdsManager {
   private _findDefaultRoot(): Node | null {
     const canvas = director.getScene()?.getChildByName('Canvas');
     return canvas?.getChildByName('Overlay') || canvas || null;
+  }
+
+  private _findConfiguredBannerNode(placement: BannerPlacement): Node | null {
+    const canvas = director.getScene()?.getChildByName('Canvas');
+    if (!canvas) return null;
+
+    const paths: Record<BannerPlacement, string[]> = {
+      start: [
+        'Overlay/StartScreen/BannerAdSlot',
+      ],
+      supply: [
+        'Overlay/SupplyPanel/BannerAdSlot',
+        'Overlay/SupplyPanel/PanelRoot/BannerAdSlot',
+      ],
+      gameOver: [
+        'Overlay/GameOverScreen/BannerAdSlot',
+        'Overlay/GameOverScreen/Bg/BannerAdSlot',
+      ],
+    };
+
+    for (const path of paths[placement]) {
+      const node = this._findNodeByPath(canvas, path);
+      if (node) return node;
+    }
+    return null;
+  }
+
+  private _findNodeByPath(root: Node, path: string): Node | null {
+    const segments = path.split('/').filter(Boolean);
+    let current: Node | null = root;
+    for (const segment of segments) {
+      current = current?.getChildByName(segment) || null;
+      if (!current) return null;
+    }
+    return current;
+  }
+
+  private _applyBannerLabel(node: Node, placement: BannerPlacement): void {
+    const text = `广告位预留: ${placement}`;
+    const selfLabel = node.getComponent(Label);
+    if (selfLabel) {
+      selfLabel.string = text;
+      return;
+    }
+
+    const labelNode = node.getChildByName('BannerLabel') || node.getChildByName('Label');
+    const label = labelNode?.getComponent(Label) || null;
+    if (label) {
+      label.string = text;
+    }
   }
 
   private _createOverlay(name: string): Node {
