@@ -11,6 +11,7 @@ import {
   WaveDefinitionData,
   WaveSpawnEntryData,
   WaveKind,
+  SupplyChestConfigData,
 } from '../data/GameConfig';
 
 export class WaveManager {
@@ -249,7 +250,7 @@ export class WaveManager {
     if (this._spawnPlan.length === 0) return;
 
     const cfg = GameConfig.bridge;
-    const chestCfg = GameConfig.gameplay.supply.chest || {};
+    const chestCfg = (GameConfig.gameplay.supply.chest || {}) as SupplyChestConfigData;
     const layout = this._layout;
     const currentRow = this._currentRow;
     const totalRows = this._totalRows;

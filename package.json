@@ -1,7 +1,13 @@
 {
   "name": "FirstGame",
   "uuid": "2bd7bf3d-6078-49f9-9e39-35d97c682293",
+  "scripts": {
+    "typecheck": "tsc --noEmit"
+  },
   "creator": {
     "version": "3.8.8"
+  },
+  "devDependencies": {
+    "typescript": "^5.5.4"
   }
 }

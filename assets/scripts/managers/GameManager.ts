@@ -1343,9 +1343,7 @@ export class GameManager extends Component {
     if (!this._shouldOfferSupply(nextWave)) return false;
 
     this._lastSupplyWaveOffered = nextWave;
-    this._state = 'supply';
-    this._showSupplyPanel(nextWave);
-    return true;
+    return this._showSupplyPanel(nextWave);
   }
 
   private _shouldOfferSupply(nextWave: number): boolean {
@@ -1356,14 +1354,16 @@ export class GameManager extends Component {
     return regular || boss;
   }
 
-  private _showSupplyPanel(nextWave: number): void {
+  private _showSupplyPanel(nextWave: number): boolean {
     this._cacheSupplyPanelRefs();
-    if (!this._supplyPanelNode?.isValid) return;
+    if (!this._supplyPanelNode?.isValid) return false;
+    const choices = this._pickSupplyOptions();
+    if (choices.length === 0) return false;
     this._freezeBattle();
     this._adsManager.showBanner('supply');
-    const choices = this._pickSupplyOptions();
     const picked = new Set<string>();
     let freePicked = false;
+    this._state = 'supply';
     this._populateSupplyPanel(
       `第${nextWave}波前补给`,
       this._getStageEnemyHint(),
@@ -1401,14 +1401,19 @@ export class GameManager extends Component {
         this._closeSupplyPanel(true);
       }
     );
+    return true;
   }
 
-  private _showSupplyChestReward(chest: SupplyChest): void {
+  private _showSupplyChestReward(chest: SupplyChest): boolean {
     this._cacheSupplyPanelRefs();
-    if (!this._supplyPanelNode?.isValid) return;
+    if (!this._supplyPanelNode?.isValid) return false;
+    const choices = this._pickSupplyOptions(chest.chestType, chest.quality, chest.serial);
+    if (choices.length === 0) {
+      this._showFloatingNotice(chest.x, chest.y + 44, '暂无可用补给', new Color(255, 228, 150));
+      return false;
+    }
     this._freezeBattle();
     this._adsManager.showBanner('supply');
-    const choices = this._pickSupplyOptions(chest.chestType, chest.quality, chest.serial);
     this._populateSupplyPanel(
       `${this._getChestDisplayName(chest.chestType)}开启`,
       this._getStageEnemyHint(),
@@ -1426,7 +1431,9 @@ export class GameManager extends Component {
         if (!completed) return;
         this._supplyAdExtrasUsed++;
         this._closeSupplyPanel(false);
-        this._showAdvancedSupplyChestReward(chest);
+        if (!this._showAdvancedSupplyChestReward(chest)) {
+          this._state = 'playing';
+        }
       },
       (option) => {
         this._applySupplyOption(option);
@@ -1435,15 +1442,20 @@ export class GameManager extends Component {
       }
     );
     this._state = 'supply';
+    return true;
   }
 
-  private _showAdvancedSupplyChestReward(chest: SupplyChest): void {
+  private _showAdvancedSupplyChestReward(chest: SupplyChest): boolean {
     this._cacheSupplyPanelRefs();
-    if (!this._supplyPanelNode?.isValid) return;
-    this._freezeBattle();
-    this._adsManager.showBanner('supply');
+    if (!this._supplyPanelNode?.isValid) return false;
     const upgradedQuality: SupplyChestQuality = chest.quality === 'normal' ? 'elite' : 'rare';
     const choices = this._pickSupplyOptions(chest.chestType, upgradedQuality, chest.serial + 2);
+    if (choices.length === 0) {
+      this._showFloatingNotice(chest.x, chest.y + 44, '暂无更高级补给', new Color(255, 228, 150));
+      return false;
+    }
+    this._freezeBattle();
+    this._adsManager.showBanner('supply');
     this._populateSupplyPanel(
       `${this._getChestDisplayName(chest.chestType)}升级补给`,
       '广告奖励：已刷新为更高级补给，三选一',
@@ -1460,13 +1472,16 @@ export class GameManager extends Component {
       }
     );
     this._state = 'supply';
+    return true;
   }
 
   private _pickSupplyOptions(chestType?: SupplyChestType, chestQuality: SupplyChestQuality = 'normal', chestSerial: number = 0): SupplyOptionData[] {
+    const desiredCount = Math.max(1, GameConfig.gameplay.supply.choiceCount + this._bonusSupplyChoices);
     const options = [...(GameConfig.gameplay.supply.options as SupplyOptionData[])].filter(option => this._canOfferSupplyOption(option));
     if ((!chestType || chestSerial >= 2) && !this._weaponEvolutionId) {
-      options.push(...(GameConfig.gameplay.weaponEvolution.options as SupplyOptionData[]));
+      options.push(...(GameConfig.gameplay.weaponEvolution.options as SupplyOptionData[]).filter(option => this._canOfferSupplyOption(option)));
     }
+    if (options.length === 0) return [];
     const supplyTier = this._progressManager.getPermanentBonuses().supplyQualityTier;
     const weightBonus = (GameConfig.gameplay.supply.qualityBonusPerTier || 0) * supplyTier;
     const phase = this._getChestRewardPhase(chestSerial);
@@ -1500,13 +1515,23 @@ export class GameManager extends Component {
       return { option, score: Math.random() * weight };
     });
     weighted.sort((a, b) => b.score - a.score);
-    let result = weighted
-      .slice(0, GameConfig.gameplay.supply.choiceCount + this._bonusSupplyChoices)
-      .map(item => item.option);
+    const result: SupplyOptionData[] = [];
+    const pickedIds = new Set<string>();
+    for (const item of weighted) {
+      if (pickedIds.has(item.option.id)) continue;
+      result.push(item.option);
+      pickedIds.add(item.option.id);
+      if (result.length >= desiredCount) break;
+    }
     if (!this._weaponEvolutionId && chestSerial >= 3 && !result.some(option => option.effect.type === 'weaponEvolution')) {
-      const evolutionPool = options.filter(option => option.effect.type === 'weaponEvolution');
+      const evolutionPool = options.filter(option => option.effect.type === 'weaponEvolution' && !pickedIds.has(option.id));
       if (evolutionPool.length > 0) {
-        result[result.length - 1] = evolutionPool[Math.floor(Math.random() * evolutionPool.length)];
+        const evolution = evolutionPool[Math.floor(Math.random() * evolutionPool.length)];
+        if (result.length >= desiredCount) {
+          const replaced = result.pop();
+          if (replaced) pickedIds.delete(replaced.id);
+        }
+        result.push(evolution);
       }
     }
     return result;
@@ -1525,6 +1550,9 @@ export class GameManager extends Component {
         break;
       case 'spreadCountAdd':
         if (this._getRunSpreadCountCap() <= 0) return false;
+        break;
+      case 'weaponEvolution':
+        if (!!this._weaponEvolutionId || !option.effect.evolutionId) return false;
         break;
     }
 
@@ -1620,15 +1648,15 @@ export class GameManager extends Component {
   private _getRunMultiShotCap(): number {
     const basePattern = this._weaponTierSystem?.firePattern;
     const maxBurst = Math.max(...GameConfig.weaponBase.baseBurstCount, 1);
-    const currentBaseBurst = basePattern?.multiShot || 1;
-    return Math.max(0, maxBurst - currentBaseBurst);
+    const currentBurst = (basePattern?.multiShot || 1) + this._bonusMultiShot;
+    return Math.max(0, maxBurst - currentBurst);
   }
 
   private _getRunSpreadCountCap(): number {
     const basePattern = this._weaponTierSystem?.firePattern;
     const maxSpread = Math.max(...GameConfig.weaponBase.baseSpreadCount, 1);
-    const currentBaseSpread = basePattern?.count || 1;
-    return Math.max(0, maxSpread - currentBaseSpread);
+    const currentSpread = (basePattern?.count || 1) + this._bonusSpreadCount;
+    return Math.max(0, maxSpread - currentSpread);
   }
 
   private _getCappedRunFireRateMultiplier(nextMultiplier: number): number {
@@ -2359,7 +2387,11 @@ export class GameManager extends Component {
   private _getWaveKillCount(waveIndex: number): number {
     const waveDef = GameConfig.waveDefs[waveIndex] || this._waveManager?.getWaveDefinition(waveIndex) || null;
     if (waveDef) {
-      const raw = Math.max(1, waveDef.entries.reduce((sum, entry) => sum + entry.count, 0));
+      let raw = 0;
+      for (const entry of waveDef.entries) {
+        raw += entry.count;
+      }
+      raw = Math.max(1, raw);
       return Math.max(1, Math.round(raw * this._getStageEnemyDensityMultiplier(waveIndex)));
     }
     const waveData = this._waveManager?.getWaveData(waveIndex);
