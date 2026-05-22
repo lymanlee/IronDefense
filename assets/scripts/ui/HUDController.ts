@@ -3,8 +3,7 @@
  * 更新波次、血条、关卡击杀进度、武器模式显示
  */
 
-import { _decorator, Component, Label, Sprite, ProgressBar, Node, Color } from 'cc';
-import { GameConfig } from '../data/GameConfig';
+import { _decorator, Component, Label, ProgressBar, Node, Color } from 'cc';
 
 const { ccclass, property } = _decorator;
 
@@ -45,11 +44,11 @@ export class HUDController extends Component {
   buffSummaryLabel: Label | null = null;
 
   start(): void {
+    this._ensureHUDRefs();
     // 默认隐藏波次间提示
     if (this.nextWaveNode) {
       this.nextWaveNode.active = false;
     }
-    // 位置在编辑器中配置
   }
 
   /**
@@ -72,26 +71,20 @@ export class HUDController extends Component {
     if (this.stageLabel) {
       this.stageLabel.string = stageLabel;
     }
-    if (this.enemyHintLabel) {
-      this.enemyHintLabel.string = enemyHintText;
-    }
-    if (this.buffSummaryLabel) {
-      this.buffSummaryLabel.string = buffSummary;
-    }
 
     // 波次
     if (this.waveLabel) {
       this.waveLabel.string = `第${waveNum}波`;
     }
 
-    // 血量数值：仅显示当前值，与参考设计一致
+    // 血量数值：展示当前/上限，方便快速判断容错
     if (this.hpLabel) {
-      this.hpLabel.string = `${Math.ceil(hp)}`;
+      this.hpLabel.string = `${Math.ceil(hp)}/${Math.ceil(maxHp)}`;
     }
 
     // 关卡击杀进度
     if (this.lvLabel) {
-      this.lvLabel.string = killProgressText;
+      this.lvLabel.string = this._compactKillProgress(killProgressText);
     }
 
     // 血条
@@ -117,14 +110,22 @@ export class HUDController extends Component {
 
     // 武器模式：琥珀金色，与游戏主题一致
     if (this.weaponLabel) {
-      this.weaponLabel.string = `⚡ ${weaponName}`;
+      this.weaponLabel.string = `火力 ${weaponName}`;
+    }
+
+    if (this.enemyHintLabel) {
+      this.enemyHintLabel.string = this._compactEnemyHint(enemyHintText);
+    }
+
+    if (this.buffSummaryLabel) {
+      this.buffSummaryLabel.string = this._compactBuffSummary(buffSummary);
     }
 
     // 波次间隔提示
     if (this.nextWaveNode) {
       this.nextWaveNode.active = inPause;
       if (this.nextWaveLabel && inPause) {
-        this.nextWaveLabel.string = `下一波: ${Math.ceil(pauseTime)}s`;
+        this.nextWaveLabel.string = `整备 ${Math.ceil(pauseTime)}s`;
       }
     }
   }
@@ -150,5 +151,29 @@ export class HUDController extends Component {
     if (!this.buffSummaryLabel) {
       this.buffSummaryLabel = this.node.getChildByName('BuffSummaryLabel')?.getComponent(Label) || null;
     }
+  }
+
+  private _compactKillProgress(text: string): string {
+    const match = text.match(/(\d+)\s*\/\s*(\d+)/);
+    if (!match) {
+      return text.replace(/^本关击杀:\s*/, '').trim();
+    }
+    return `击毁 ${match[1]}/${match[2]}`;
+  }
+
+  private _compactEnemyHint(text: string): string {
+    const compact = text.replace(/^敌情提示:\s*/, '').trim();
+    return `敌情 ${compact}`;
+  }
+
+  private _compactBuffSummary(text: string): string {
+    const compact = text.replace(/^本关增益:\s*/, '').trim();
+    if (!compact || compact === '无') {
+      return '增益 暂无';
+    }
+
+    const parts = compact.split('·').map(part => part.trim()).filter(Boolean);
+    const summary = parts.slice(0, 2).join(' · ');
+    return `增益 ${summary}${parts.length > 2 ? '…' : ''}`;
   }
 }

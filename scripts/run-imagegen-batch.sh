@@ -18,6 +18,14 @@ fi
 
 mkdir -p "${OUTPUT_DIR}"
 
+if [[ "${OPENAI_BASE_URL}" == *"12ai.org"* ]]; then
+  echo "12AI detected. Using scripts/generate_third_batch.py to force response_format=b64_json."
+  python3 "${ROOT_DIR}/scripts/generate_third_batch.py" \
+    --input "${INPUT_FILE}" \
+    --out-dir "${OUTPUT_DIR}"
+  exit 0
+fi
+
 python3 "${IMAGE_GEN}" generate-batch \
   --input "${INPUT_FILE}" \
   --out-dir "${OUTPUT_DIR}" \

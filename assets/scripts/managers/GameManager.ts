@@ -205,6 +205,10 @@ export class GameManager extends Component {
     if (scene) {
       const canvas = scene.getChildByName('Canvas');
       const overlayNode = canvas?.getChildByName('Overlay');
+      if (overlayNode) {
+        // 启动时强制恢复 Overlay 可见，避免编辑器里的调试显隐影响实际开局流程。
+        overlayNode.active = true;
+      }
       this._adsManager.init(overlayNode || canvas || null);
 
       // StartScreen
@@ -483,7 +487,7 @@ export class GameManager extends Component {
         this._playerCar.hp,
         this._playerCar.maxHp,
         this._getStageKillProgressPct(),
-        this._getStageKillProgressText(),
+        this._getStageKillProgressHUDText(),
         this._getWeaponDisplayName(),
         this._getStageEnemyHint(),
         this._getStageBuffSummary(),
@@ -1598,16 +1602,16 @@ export class GameManager extends Component {
         this._fireRateBoostUntilWave = 0;
         break;
       case 'multiShotAdd':
-        this._bonusMultiShot = Math.min(
+        this._bonusMultiShot += Math.min(
           this._getRunMultiShotCap(),
-          this._bonusMultiShot + Math.max(0, Math.round(option.effect.value || 0))
+          Math.max(0, Math.round(option.effect.value || 0))
         );
         this._playerCar.setRunFirePatternBonus(this._bonusMultiShot, this._bonusSpreadCount);
         break;
       case 'spreadCountAdd':
-        this._bonusSpreadCount = Math.min(
+        this._bonusSpreadCount += Math.min(
           this._getRunSpreadCountCap(),
-          this._bonusSpreadCount + Math.max(0, Math.round(option.effect.value || 0))
+          Math.max(0, Math.round(option.effect.value || 0))
         );
         this._playerCar.setRunFirePatternBonus(this._bonusMultiShot, this._bonusSpreadCount);
         break;
@@ -2053,7 +2057,7 @@ export class GameManager extends Component {
     const banner = new Node('WaveBanner');
     const transform = banner.addComponent(UITransform);
     transform.setContentSize(420, 90);
-    banner.setPosition(0, 500, 0);
+    banner.setPosition(0, 430, 0);
 
     const graphics = banner.addComponent(Graphics);
     graphics.fillColor = waveDef.kind === 'boss' ? new Color(90, 34, 22, 235) : new Color(22, 32, 52, 220);
@@ -2076,7 +2080,7 @@ export class GameManager extends Component {
     this._waveBannerNode = banner;
     tween(banner)
       .delay(1.6)
-      .to(0.35, { position: new Vec3(0, 620, 0) })
+      .to(0.35, { position: new Vec3(0, 575, 0) })
       .call(() => {
         if (banner.isValid) banner.destroy();
         if (this._waveBannerNode === banner) this._waveBannerNode = null;
@@ -2337,6 +2341,12 @@ export class GameManager extends Component {
     return `本关击杀: ${current}/${goal} (${pct}%)`;
   }
 
+  private _getStageKillProgressHUDText(stageIndex: number = this._stageManager.currentStageIndex): string {
+    const goal = this._getStageKillGoal(stageIndex);
+    const current = Math.min(this._kills, goal);
+    return `击毁 ${current}/${goal}`;
+  }
+
   private _getStageEnemyHint(stageIndex: number = this._stageManager.currentStageIndex): string {
     const stageDefs = this._getStageDefs();
     const stage = stageDefs[stageIndex];
@@ -2461,9 +2471,10 @@ export class GameManager extends Component {
     const laneCount = GameConfig.bridge.laneCount;
     const laneWidth = (GameConfig.bridge.right - GameConfig.bridge.left) / laneCount;
     const laneIndex = Math.max(0, Math.min(laneCount - 1, cfg.laneIndex || 0));
-    this._chestTrackX = GameConfig.bridge.left + (laneIndex + 0.5) * laneWidth;
+    const laneAnchor = laneIndex <= 0 ? 0.34 : laneIndex >= laneCount - 1 ? 0.66 : 0.5;
+    this._chestTrackX = GameConfig.bridge.left + (laneIndex + laneAnchor) * laneWidth;
     const stopY = GameConfig.bridge.top - bridgeHeight * Math.max(0.1, Math.min(0.9, cfg.stopRatio || 0.75));
-    const gap = Math.max((cfg.radius || 58) * 2 + 10, cfg.slotGap || 18);
+    const gap = Math.max((cfg.radius || 58) * 1.35, cfg.slotGap || 18);
     this._chestSlots = [];
     for (let i = 0; i < capacity; i++) {
       this._chestSlots.push({

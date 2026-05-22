@@ -18,7 +18,7 @@ export const GameConfig = {
   bridge: {
     left: -280,       // 桥左边界 x（原 80 - 360）
     right: 280,       // 桥右边界 x（原 640 - 360）
-    top: 520,         // 桥顶端 y（敌人起始区域，屏幕上方）
+    top: 430,         // 桥顶端 y（下移出生区，避免压住 HUD）
     laneCount: 5,     // 桥面列数
     railY: -520,      // 护栏 y 坐标（屏幕下方）
     carY: -580,       // 武装车 y 坐标（护栏下方，保护栅栏）
@@ -437,7 +437,7 @@ export const GameConfig = {
         maxSelectionsPerRun: 9,
         baseSpawnDelay: 3.2,
         delayVariance: 0,
-        radius: 58,
+        radius: 42,
         lowerY: 0,
         upperY: 0,
         speedMultiplier: 130,
@@ -453,7 +453,7 @@ export const GameConfig = {
         capacity: 5,
         slotGap: 26,
         topOffset: 24,
-        stopRatio: 0.75,
+        stopRatio: 0.82,
         refillDelay: 0.45,
         baseHpFactor: 9.5,
         waveGrowth: 0.16,

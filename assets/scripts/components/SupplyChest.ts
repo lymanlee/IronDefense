@@ -41,22 +41,22 @@ export class SupplyChest extends Component {
 
     const titleNode = new Node('ChestTitle');
     const titleTransform = titleNode.addComponent(UITransform);
-    titleTransform.setContentSize(240, 36);
-    titleNode.setPosition(0, 8, 0);
+    titleTransform.setContentSize(140, 22);
+    titleNode.setPosition(0, 12, 0);
     this._label = titleNode.addComponent(Label);
-    this._label.fontSize = 22;
-    this._label.lineHeight = 24;
+    this._label.fontSize = 14;
+    this._label.lineHeight = 16;
     this._label.horizontalAlign = Label.HorizontalAlign.CENTER;
     this._label.verticalAlign = Label.VerticalAlign.CENTER;
     this.node.addChild(titleNode);
 
     const hpNode = new Node('ChestHp');
     const hpTransform = hpNode.addComponent(UITransform);
-    hpTransform.setContentSize(240, 28);
-    hpNode.setPosition(0, -18, 0);
+    hpTransform.setContentSize(120, 18);
+    hpNode.setPosition(0, -14, 0);
     this._hpLabel = hpNode.addComponent(Label);
-    this._hpLabel.fontSize = 16;
-    this._hpLabel.lineHeight = 18;
+    this._hpLabel.fontSize = 12;
+    this._hpLabel.lineHeight = 14;
     this._hpLabel.horizontalAlign = Label.HorizontalAlign.CENTER;
     this._hpLabel.verticalAlign = Label.VerticalAlign.CENTER;
     this.node.addChild(hpNode);
@@ -96,7 +96,7 @@ export class SupplyChest extends Component {
     this.node.active = true;
     this.node.setPosition(x, y, 0);
     const transform = this.node.getComponent(UITransform);
-    transform?.setContentSize(radius * 2 + 42, radius * 2 + 48);
+    transform?.setContentSize(radius * 2 + 18, radius * 2 + 24);
     if (this._opacity) this._opacity.opacity = 255;
     this._refreshView();
   }
@@ -209,12 +209,12 @@ export class SupplyChest extends Component {
     this._graphics.stroke();
 
     this._graphics.fillColor = new Color(255, 255, 255, 70);
-    this._graphics.rect(-this._radius + 8, 2, this._radius * 2 - 16, 10);
+    this._graphics.rect(-this._radius + 6, -1, this._radius * 2 - 12, 8);
     this._graphics.fill();
 
     const ratio = this.hpRatio;
     this._graphics.fillColor = textColor;
-    this._graphics.rect(-this._radius + 8, 2, (this._radius * 2 - 16) * ratio, 10);
+    this._graphics.rect(-this._radius + 6, -1, (this._radius * 2 - 12) * ratio, 8);
     this._graphics.fill();
 
     if (this._label) {
@@ -222,25 +222,20 @@ export class SupplyChest extends Component {
       this._label.color = textColor;
     }
     if (this._hpLabel) {
-      this._hpLabel.string = `${Math.ceil(this._hp)}/${Math.ceil(this._maxHp)}`;
+      this._hpLabel.string = `${Math.ceil(this._hp)}`;
       this._hpLabel.color = new Color(240, 244, 255, 220);
     }
   }
 
   private _getTitle(): string {
     const typeLabel: Record<SupplyChestType, string> = {
-      firepower: '火力箱',
-      control: '控制箱',
-      rare: '稀有箱',
-      survival: '火力箱',
-      resource: '控制箱',
+      firepower: '火力补给',
+      control: '控制补给',
+      rare: '稀有补给',
+      survival: '火力补给',
+      resource: '控制补给',
     };
-    const qualityLabel: Record<SupplyChestQuality, string> = {
-      normal: '普通',
-      elite: '精英',
-      rare: '稀有',
-    };
-    return `${qualityLabel[this._quality]}${typeLabel[this._type]}`;
+    return typeLabel[this._type];
   }
 
   private _getBodyColor(): Color {
