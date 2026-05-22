@@ -3,7 +3,7 @@
  * 协调所有游戏系统，主循环，状态机
  */
 
-import { _decorator, Component, Node, instantiate, Prefab, tween, Vec3, Color, Tween, input, Input, KeyCode, director, Sprite, UIOpacity, UITransform, SpriteFrame, Graphics, Label, Button, BlockInputEvents, resources } from 'cc';
+import { _decorator, Component, Node, instantiate, Prefab, tween, Vec3, Color, Tween, input, Input, KeyCode, director, Sprite, UIOpacity, UITransform, SpriteFrame, Graphics, Label, Button, resources } from 'cc';
 import { GameConfig, PermanentUpgradeId, SupplyChestConfigData, SupplyChestQuality, SupplyChestType, SupplyMode, SupplyOptionData, WaveDefinitionData, WeaponEvolutionData, WeaponEvolutionId } from '../data/GameConfig';
 import { WeaponTierSystem } from '../components/WeaponTierSystem';
 import { AttackTarget, PlayerCar } from '../components/PlayerCar';
@@ -128,6 +128,9 @@ export class GameManager extends Component {
   private _garageScreenNode: Node | null = null;
   private _gameLayerNode: Node | null = null;
   private _revivePanelNode: Node | null = null;
+  private _reviveBodyLabel: Label | null = null;
+  private _reviveAdButtonNode: Node | null = null;
+  private _reviveGiveUpButtonNode: Node | null = null;
   private _supplyPanelNode: Node | null = null;
   private _supplyPanelTitleLabel: Label | null = null;
   private _supplyPanelHintLabel: Label | null = null;
@@ -262,6 +265,8 @@ export class GameManager extends Component {
           this._garageScreen.setOnUpgrade((id) => this._upgradePermanentNode(id));
         }
       }
+
+      this._cacheRevivePanelRefs(overlayNode);
 
       // GameOverScreen
       const gameOverNode = overlayNode?.getChildByName('GameOverScreen') || null;
@@ -1210,23 +1215,17 @@ export class GameManager extends Component {
       }
     }
     if (this._hud) this._hud.node.active = false;
-    this._adsManager.showBanner('gameOver');
   }
 
   private _showReviveOffer(): void {
-    if (this._revivePanelNode?.isValid) return;
-
-    const panel = this._createModalRoot('ReviveOfferPanel');
-    this._createModalLabel(panel, 'ReviveTitle', '车辆损毁', 54, 180, new Color(255, 92, 92));
-    this._createModalLabel(panel, 'ReviveBody', `看广告复活\n恢复${Math.round(GameConfig.gameplay.revive.hpRatio * 100)}%耐久，并获得${GameConfig.gameplay.revive.invulnerableSeconds}秒无敌`, 28, 70, Color.WHITE);
-    this._createModalButton(panel, 'ReviveAdBtn', '看广告复活', 0, () => this._handleReviveAd(), 340, 78, new Color(255, 210, 92));
-    this._createModalButton(panel, 'GiveUpBtn', '放弃并结算', -100, () => {
-      this._closeRevivePanel();
+    if (!this._revivePanelNode?.isValid) {
+      console.warn('[GameManager] ReviveOfferPanel node missing, skip revive offer');
       this._enterGameOver();
-    }, 300, 66, new Color(70, 78, 92));
+      return;
+    }
 
-    this._addToOverlay(panel);
-    this._revivePanelNode = panel;
+    this._refreshRevivePanelContent();
+    this._revivePanelNode.active = true;
   }
 
   private async _handleReviveAd(): Promise<void> {
@@ -1262,9 +1261,18 @@ export class GameManager extends Component {
 
   private _closeRevivePanel(): void {
     if (this._revivePanelNode?.isValid) {
-      this._revivePanelNode.destroy();
+      this._revivePanelNode.active = false;
     }
-    this._revivePanelNode = null;
+  }
+
+  onReviveAdClick(): void {
+    void this._handleReviveAd();
+  }
+
+  onReviveGiveUpClick(): void {
+    if (this._state !== 'revive') return;
+    this._closeRevivePanel();
+    this._enterGameOver();
   }
 
   private _enterGameOver(): void {
@@ -1299,7 +1307,6 @@ export class GameManager extends Component {
       }
     }
     if (this._hud) this._hud.node.active = false;
-    this._adsManager.showBanner('gameOver');
   }
 
   private _calculateRunReward(): RunReward {
@@ -1892,120 +1899,6 @@ export class GameManager extends Component {
     this._getActiveSupplyChests().forEach(chest => chest.setBattleFrozen(false));
   }
 
-  private _createModalRoot(name: string): Node {
-    const panel = new Node(name);
-    const transform = panel.addComponent(UITransform);
-    transform.setContentSize(GameConfig.canvas.width, GameConfig.canvas.height);
-    panel.addComponent(BlockInputEvents);
-
-    const graphics = panel.addComponent(Graphics);
-    graphics.fillColor = new Color(0, 0, 0, 210);
-    graphics.rect(-GameConfig.canvas.width / 2, -GameConfig.canvas.height / 2, GameConfig.canvas.width, GameConfig.canvas.height);
-    graphics.fill();
-
-    graphics.fillColor = new Color(22, 28, 38, 245);
-    graphics.roundRect(-290, -340, 580, 720, 18);
-    graphics.fill();
-    graphics.strokeColor = new Color(255, 210, 92, 180);
-    graphics.lineWidth = 2;
-    graphics.roundRect(-290, -340, 580, 720, 18);
-    graphics.stroke();
-    return panel;
-  }
-
-  private _createModalLabel(parent: Node, name: string, text: string, fontSize: number, y: number, color: Color): Node {
-    const node = new Node(name);
-    const transform = node.addComponent(UITransform);
-    transform.setContentSize(520, 120);
-    node.setPosition(0, y, 0);
-    const label = node.addComponent(Label);
-    label.string = text;
-    label.fontSize = fontSize;
-    label.lineHeight = Math.round(fontSize * 1.25);
-    label.horizontalAlign = Label.HorizontalAlign.CENTER;
-    label.verticalAlign = Label.VerticalAlign.CENTER;
-    label.color = color.clone();
-    parent.addChild(node);
-    return node;
-  }
-
-  private _createModalButton(parent: Node, name: string, text: string, y: number, callback: () => void, width: number, height: number, color: Color): Node {
-    const node = new Node(name);
-    const transform = node.addComponent(UITransform);
-    transform.setContentSize(width, height);
-    node.setPosition(0, y, 0);
-
-    const graphics = node.addComponent(Graphics);
-    graphics.fillColor = color.clone();
-    graphics.roundRect(-width / 2, -height / 2, width, height, 12);
-    graphics.fill();
-
-    node.addComponent(Button);
-    node.on(Node.EventType.TOUCH_END, callback, this);
-
-    const labelNode = new Node('Label');
-    const labelTransform = labelNode.addComponent(UITransform);
-    labelTransform.setContentSize(width - 28, height - 10);
-    const label = labelNode.addComponent(Label);
-    label.string = text;
-    label.fontSize = text.includes('\n') ? 22 : 26;
-    label.lineHeight = text.includes('\n') ? 27 : 32;
-    label.horizontalAlign = Label.HorizontalAlign.CENTER;
-    label.verticalAlign = Label.VerticalAlign.CENTER;
-    label.color = color.r > 180 ? new Color(60, 40, 0) : Color.WHITE.clone();
-    node.addChild(labelNode);
-
-    parent.addChild(node);
-    return node;
-  }
-
-  private _createModalIconButton(parent: Node, name: string, text: string, iconPath: string, y: number, callback: () => void, width: number, height: number, color: Color): Node {
-    const node = new Node(name);
-    const transform = node.addComponent(UITransform);
-    transform.setContentSize(width, height);
-    node.setPosition(0, y, 0);
-
-    const graphics = node.addComponent(Graphics);
-    graphics.fillColor = color.clone();
-    graphics.roundRect(-width / 2, -height / 2, width, height, 12);
-    graphics.fill();
-
-    node.addComponent(Button);
-    node.on(Node.EventType.TOUCH_END, callback, this);
-
-    const iconNode = new Node('Icon');
-    const iconTransform = iconNode.addComponent(UITransform);
-    iconTransform.setContentSize(48, 48);
-    iconNode.setPosition(-width / 2 + 34, 0, 0);
-    const iconSprite = iconNode.addComponent(Sprite);
-    iconSprite.sizeMode = Sprite.SizeMode.CUSTOM;
-    iconSprite.type = Sprite.Type.SIMPLE;
-    iconNode.addComponent(UIOpacity);
-    node.addChild(iconNode);
-    const resourcePath = iconPath.replace(/^db:\/\/assets\/resources\//, '').replace(/\.png$/i, '');
-    resources.load(resourcePath, SpriteFrame, (err, sf) => {
-      if (!err && sf && iconNode.isValid) {
-        iconSprite.spriteFrame = sf;
-      }
-    });
-
-    const labelNode = new Node('Label');
-    const labelTransform = labelNode.addComponent(UITransform);
-    labelTransform.setContentSize(width - 92, height - 10);
-    labelNode.setPosition(38, 0, 0);
-    const label = labelNode.addComponent(Label);
-    label.string = text;
-    label.fontSize = text.includes('\n') ? 21 : 25;
-    label.lineHeight = text.includes('\n') ? 26 : 30;
-    label.horizontalAlign = Label.HorizontalAlign.LEFT;
-    label.verticalAlign = Label.VerticalAlign.CENTER;
-    label.color = color.r > 180 ? new Color(60, 40, 0) : Color.WHITE.clone();
-    node.addChild(labelNode);
-
-    parent.addChild(node);
-    return node;
-  }
-
   private _getSupplyIconPath(optionId: string): string {
     const map: Record<string, string> = {
       damage_boost: 'db://assets/resources/ui/common/icons_supply_v2/icon_supply_damage.png',
@@ -2115,6 +2008,33 @@ export class GameManager extends Component {
     this._supplyPanelSubTitleLabel = panelRoot?.getChildByName('SubTitleLabel')?.getComponent(Label) || null;
     this._supplyPanelStatusLabel = panelRoot?.getChildByName('StatusLabel')?.getComponent(Label) || null;
     this._supplyPanelAdButton = panelRoot?.getChildByName('AdButton') || null;
+  }
+
+  private _cacheRevivePanelRefs(overlayNode?: Node | null): void {
+    const overlay = overlayNode
+      || director.getScene()?.getChildByName('Canvas')?.getChildByName('Overlay')
+      || null;
+
+    this._revivePanelNode = overlay?.getChildByName('ReviveOfferPanel') || null;
+    const dialogPanel = this._revivePanelNode?.getChildByName('DialogPanel') || null;
+    this._reviveBodyLabel = dialogPanel?.getChildByName('BodyLabel')?.getComponent(Label) || null;
+    this._reviveAdButtonNode = dialogPanel?.getChildByName('ReviveAdBtn') || null;
+    this._reviveGiveUpButtonNode = dialogPanel?.getChildByName('GiveUpBtn') || null;
+    this._reviveAdButtonNode?.off(Node.EventType.TOUCH_END, this.onReviveAdClick, this);
+    this._reviveGiveUpButtonNode?.off(Node.EventType.TOUCH_END, this.onReviveGiveUpClick, this);
+    this._reviveAdButtonNode?.on(Node.EventType.TOUCH_END, this.onReviveAdClick, this);
+    this._reviveGiveUpButtonNode?.on(Node.EventType.TOUCH_END, this.onReviveGiveUpClick, this);
+    if (this._revivePanelNode) {
+      this._revivePanelNode.active = false;
+    }
+  }
+
+  private _refreshRevivePanelContent(): void {
+    if (!this._reviveBodyLabel) return;
+    const bonus = this._progressManager.getPermanentBonuses();
+    const hpRatio = Math.round((GameConfig.gameplay.revive.hpRatio + bonus.reviveHpBonusRatio) * 100);
+    const shieldSeconds = GameConfig.gameplay.revive.invulnerableSeconds + bonus.reviveShieldSeconds;
+    this._reviveBodyLabel.string = `看广告复活\n恢复${hpRatio}%耐久，并获得${shieldSeconds}秒无敌`;
   }
 
   private _addToOverlay(node: Node): void {
@@ -2363,6 +2283,13 @@ export class GameManager extends Component {
 
   private _getStageDisplayLabel(): string {
     return `第${this._stageManager.currentStageIndex + 1}关`;
+  }
+
+  private _getStageNameWithIndex(stageIndex: number): string {
+    const stageDefs = this._getStageDefs();
+    const stage = stageDefs[stageIndex];
+    const stageName = stage?.name || `第${stageIndex + 1}关`;
+    return `${stageIndex + 1}.${stageName}`;
   }
 
   private _getStageWaveNum(): number {
@@ -2680,7 +2607,7 @@ export class GameManager extends Component {
     startScreen.updateStageInfo({
       eyebrow: '当前作战关卡',
       code: '',
-      name: stage.name,
+      name: this._getStageNameWithIndex(this._currentStageIndex),
       waveText: `${stage.waveCount} 波`,
       rewardText: `金币 +${stage.rewardBonus.coins}`,
       partsText: stage.rewardBonus.parts > 0 ? `零件 +${stage.rewardBonus.parts}` : '',

@@ -47,7 +47,8 @@
       "__type__": "cc.Quat",
       "x": 0,
       "y": 0,
-      "z": 0
+      "z": 0,
+      "w": 1
     },
     "_lscale": {
       "__type__": "cc.Vec3",
@@ -96,7 +97,8 @@
       "__type__": "cc.Quat",
       "x": 0,
       "y": 0,
-      "z": 0
+      "z": 0,
+      "w": 1
     },
     "_lscale": {
       "__type__": "cc.Vec3",
@@ -154,6 +156,16 @@
     "__prefab": {
       "__id__": 6
     },
+    "_customMaterial": null,
+    "_srcBlendFactor": 2,
+    "_dstBlendFactor": 4,
+    "_color": {
+      "__type__": "cc.Color",
+      "r": 255,
+      "g": 255,
+      "b": 255,
+      "a": 255
+    },
     "_string": "升级",
     "_horizontalAlign": 1,
     "_verticalAlign": 1,
@@ -171,6 +183,29 @@
     "_isUnderline": false,
     "_underlineHeight": 2,
     "_cacheMode": 0,
+    "_enableOutline": false,
+    "_outlineColor": {
+      "__type__": "cc.Color",
+      "r": 0,
+      "g": 0,
+      "b": 0,
+      "a": 255
+    },
+    "_outlineWidth": 2,
+    "_enableShadow": false,
+    "_shadowColor": {
+      "__type__": "cc.Color",
+      "r": 0,
+      "g": 0,
+      "b": 0,
+      "a": 255
+    },
+    "_shadowOffset": {
+      "__type__": "cc.Vec2",
+      "x": 2,
+      "y": 2
+    },
+    "_shadowBlur": 2,
     "_id": ""
   },
   {
@@ -230,10 +265,6 @@
     "__prefab": {
       "__id__": 11
     },
-    "_spriteFrame": {
-      "__uuid__": "c2bf5e4d-e79c-451d-8260-9efe2edc4dbb@f9941",
-      "__expectedType__": "cc.SpriteFrame"
-    },
     "_customMaterial": null,
     "_srcBlendFactor": 2,
     "_dstBlendFactor": 4,
@@ -243,6 +274,10 @@
       "g": 245,
       "b": 245,
       "a": 255
+    },
+    "_spriteFrame": {
+      "__uuid__": "c2bf5e4d-e79c-451d-8260-9efe2edc4dbb@f9941",
+      "__expectedType__": "cc.SpriteFrame"
     },
     "_type": 1,
     "_fillType": 0,
@@ -275,6 +310,7 @@
     "__prefab": {
       "__id__": 13
     },
+    "clickEvents": [],
     "_interactable": true,
     "_transition": 3,
     "_normalColor": {
@@ -314,7 +350,6 @@
     "_target": {
       "__id__": 1
     },
-    "_clickEvents": [],
     "_id": ""
   },
   {
@@ -331,7 +366,6 @@
     },
     "fileId": "68YuHNicNElZ1HmdnWFH6d",
     "instance": null,
-    "targetOverrides": null,
-    "nestedPrefabInstanceRoots": null
+    "targetOverrides": null
   }
 ]

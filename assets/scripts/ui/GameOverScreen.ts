@@ -1,107 +1,152 @@
 /**
  * GameOverScreen.ts - 结算界面
- * 显示 Game Over 或 Victory，以及统计数据
+ * 负责填充结算文案与按钮状态，视觉样式尽量在编辑器中配置
  */
 
-import { _decorator, Component, Label, Node, UITransform, Button, Graphics, Color } from 'cc';
+import { _decorator, Button, Color, Component, Label, Node } from 'cc';
 
 const { ccclass, property } = _decorator;
 
 @ccclass('GameOverScreen')
 export class GameOverScreen extends Component {
-  // 回调
   private _onRestart: (() => void) | null = null;
   private _onMenu: (() => void) | null = null;
   private _onDoubleReward: (() => void) | null = null;
-  private _doubleRewardButton: Node | null = null;
-  private _doubleRewardLabel: Label | null = null;
   private _doubleRewardEnabled: boolean = true;
 
   @property(Label)
   titleLabel: Label | null = null;
 
   @property(Label)
+  subtitleLabel: Label | null = null;
+
+  @property(Label)
   statsLabel: Label | null = null;
 
-  /**
-   * 设置重新开始回调
-   */
+  @property(Label)
+  stageLineLabel: Label | null = null;
+
+  @property(Label)
+  combatLineLabel: Label | null = null;
+
+  @property(Label)
+  progressLineLabel: Label | null = null;
+
+  @property(Label)
+  rewardLabel: Label | null = null;
+
+  @property(Button)
+  doubleRewardButton: Button | null = null;
+
+  @property(Button)
+  restartButton: Button | null = null;
+
+  @property(Label)
+  doubleRewardLabel: Label | null = null;
+
+  @property(Node)
+  bannerAdSlot: Node | null = null;
+
+  @property({ type: Color })
+  gameOverTitleColor: Color = new Color(255, 102, 92, 255);
+
+  @property({ type: Color })
+  victoryTitleColor: Color = new Color(255, 226, 130, 255);
+
   setOnRestart(callback: () => void): void {
     this._onRestart = callback;
   }
 
-  /**
-   * 设置返回菜单回调
-   */
   setOnMenu(callback: () => void): void {
     this._onMenu = callback;
   }
 
-  /**
-   * 设置结算双倍广告回调
-   */
   setOnDoubleReward(callback: () => void): void {
     this._onDoubleReward = callback;
-    this._ensureDoubleRewardButton();
+    this._ensureRefs();
+    if (this.doubleRewardButton) {
+      this.doubleRewardButton.node.active = !!callback;
+    }
   }
 
-  /**
-   * 显示 Game Over
-   */
-  showGameOver(stageLabel: string, kills: number, wave: number, progressText: string, coins: number = 0, parts: number = 0): void {
+  showGameOver(
+    stageLabel: string,
+    kills: number,
+    wave: number,
+    progressText: string,
+    coins: number = 0,
+    parts: number = 0,
+  ): void {
+    this._ensureRefs();
     if (this.titleLabel) {
-      this.titleLabel.string = 'GAME OVER';
-      // 红色
-      if (this.titleLabel.color) {
-        this.titleLabel.color.set(255, 68, 68);
-      }
+      this.titleLabel.string = '很遗憾，继续加油！';
+      this.titleLabel.color = this.gameOverTitleColor;
+    }
+    if (this.subtitleLabel) {
+      this.subtitleLabel.node.active = false;
     }
     if (this.statsLabel) {
-      this.statsLabel.string = `关卡: ${stageLabel}  波次: ${wave}\n击杀: ${kills}\n${progressText}\n金币: ${coins}  零件: ${parts}`;
+      this.statsLabel.node.active = !this.stageLineLabel && !this.combatLineLabel && !this.progressLineLabel;
+    }
+    this._setSummaryLines(stageLabel, kills, wave, progressText, '抵达波次');
+    if (this.rewardLabel) {
+      this.rewardLabel.string = `基础奖励  金币 +${coins}   零件 +${parts}`;
+    }
+    if (this.restartButton) {
+      this.restartButton.node.active = !!this._onRestart;
+    }
+    if (this.bannerAdSlot) {
+      this.bannerAdSlot.active = false;
     }
     this.setDoubleRewardAvailable(true, '看广告双倍奖励');
     this.node.active = true;
   }
 
-  /**
-   * 显示胜利
-   */
-  showVictory(stageLabel: string, kills: number, wave: number, progressText: string, coins: number = 0, parts: number = 0): void {
+  showVictory(
+    stageLabel: string,
+    kills: number,
+    wave: number,
+    progressText: string,
+    coins: number = 0,
+    parts: number = 0,
+  ): void {
+    this._ensureRefs();
     if (this.titleLabel) {
-      this.titleLabel.string = '胜利!';
-      // 金色
-      if (this.titleLabel.color) {
-        this.titleLabel.color.set(255, 233, 77);
-      }
+      this.titleLabel.string = '太棒了，已取得阶段胜利！';
+      this.titleLabel.color = this.victoryTitleColor;
+    }
+    if (this.subtitleLabel) {
+      this.subtitleLabel.node.active = false;
     }
     if (this.statsLabel) {
-      this.statsLabel.string = `关卡: ${stageLabel}  波次: ${wave}\n击杀: ${kills}\n${progressText}\n金币: ${coins}  零件: ${parts}`;
+      this.statsLabel.node.active = !this.stageLineLabel && !this.combatLineLabel && !this.progressLineLabel;
+    }
+    this._setSummaryLines(stageLabel, kills, wave, progressText, '完成波次');
+    if (this.rewardLabel) {
+      this.rewardLabel.string = `结算奖励  金币 +${coins}   零件 +${parts}`;
+    }
+    if (this.restartButton) {
+      this.restartButton.node.active = false;
+    }
+    if (this.bannerAdSlot) {
+      this.bannerAdSlot.active = false;
     }
     this.setDoubleRewardAvailable(true, '看广告双倍奖励');
     this.node.active = true;
   }
 
-  /**
-   * 点击重新开始
-   */
   onRestartClicked(): void {
     if (this._onRestart) {
       this._onRestart();
     }
   }
 
-  /**
-   * 点击返回菜单
-   */
   onMenuClicked(): void {
     if (this._onMenu) {
       this._onMenu();
     }
   }
 
-  /**
-   * 点击结算双倍奖励
-   */
   onDoubleRewardClicked(): void {
     if (!this._doubleRewardEnabled) return;
     if (this._onDoubleReward) {
@@ -110,51 +155,91 @@ export class GameOverScreen extends Component {
   }
 
   setDoubleRewardAvailable(available: boolean, text: string): void {
-    this._ensureDoubleRewardButton();
+    this._ensureRefs();
     this._doubleRewardEnabled = available;
-    if (this._doubleRewardLabel) {
-      this._doubleRewardLabel.string = text;
-      this._doubleRewardLabel.color = available ? new Color(80, 40, 0) : new Color(160, 160, 160);
+    if (this.doubleRewardButton) {
+      this.doubleRewardButton.interactable = available;
+      this.doubleRewardButton.node.active = !!this._onDoubleReward;
+    }
+    if (this.doubleRewardLabel) {
+      this.doubleRewardLabel.string = text;
     }
   }
 
-  /**
-   * 隐藏界面
-   */
   hide(): void {
     this.node.active = false;
   }
 
-  private _ensureDoubleRewardButton(): void {
-    if (this._doubleRewardButton?.isValid) return;
+  private _buildStatsText(stageLabel: string, kills: number, wave: number, progressText: string): string {
+    return [
+      `作战关卡  ${stageLabel}    抵达波次  ${wave}`,
+      `击毁敌军  ${kills}    推进结果  ${progressText}`,
+    ].join('\n');
+  }
 
-    const parent = this.node.getChildByName('Bg') || this.node;
-    const buttonNode = new Node('DoubleRewardBtn');
-    const transform = buttonNode.addComponent(UITransform);
-    transform.setContentSize(300, 70);
-    buttonNode.setPosition(0, -95, 0);
+  private _setSummaryLines(
+    stageLabel: string,
+    kills: number,
+    wave: number,
+    progressText: string,
+    wavePrefix: string,
+  ): void {
+    if (this.stageLineLabel || this.combatLineLabel || this.progressLineLabel) {
+      if (this.stageLineLabel) {
+        this.stageLineLabel.string = `作战关卡  ${stageLabel}`;
+      }
+      if (this.combatLineLabel) {
+        this.combatLineLabel.string = `${wavePrefix}  ${wave}    击毁敌军  ${kills}`;
+      }
+      if (this.progressLineLabel) {
+        this.progressLineLabel.string = progressText;
+      }
+      return;
+    }
 
-    const graphics = buttonNode.addComponent(Graphics);
-    graphics.fillColor = new Color(255, 210, 92, 255);
-    graphics.roundRect(-150, -35, 300, 70, 12);
-    graphics.fill();
+    if (this.statsLabel) {
+      this.statsLabel.string = this._buildStatsText(stageLabel, kills, wave, progressText);
+    }
+  }
 
-    buttonNode.addComponent(Button);
-    buttonNode.on(Node.EventType.TOUCH_END, this.onDoubleRewardClicked, this);
+  private _ensureRefs(): void {
+    const bg = this.node.getChildByName('Bg');
+    const panel = bg?.getChildByName('Panel');
+    const infoCard = panel?.getChildByName('InfoCard');
+    const rewardCard = panel?.getChildByName('RewardCard');
 
-    const labelNode = new Node('Label');
-    const labelTransform = labelNode.addComponent(UITransform);
-    labelTransform.setContentSize(260, 44);
-    this._doubleRewardLabel = labelNode.addComponent(Label);
-    this._doubleRewardLabel.string = '看广告双倍奖励';
-    this._doubleRewardLabel.fontSize = 26;
-    this._doubleRewardLabel.lineHeight = 34;
-    this._doubleRewardLabel.horizontalAlign = Label.HorizontalAlign.CENTER;
-    this._doubleRewardLabel.verticalAlign = Label.VerticalAlign.CENTER;
-    this._doubleRewardLabel.color = new Color(80, 40, 0);
-    buttonNode.addChild(labelNode);
-
-    parent.addChild(buttonNode);
-    this._doubleRewardButton = buttonNode;
+    if (!this.titleLabel) {
+      this.titleLabel = panel?.getChildByName('TitleLabel')?.getComponent(Label) || null;
+    }
+    if (!this.subtitleLabel) {
+      this.subtitleLabel = panel?.getChildByName('SubtitleLabel')?.getComponent(Label) || null;
+    }
+    if (!this.statsLabel) {
+      this.statsLabel = panel?.getChildByName('StatsLabel')?.getComponent(Label) || null;
+    }
+    if (!this.stageLineLabel) {
+      this.stageLineLabel = infoCard?.getChildByName('StageLineLabel')?.getComponent(Label) || null;
+    }
+    if (!this.combatLineLabel) {
+      this.combatLineLabel = infoCard?.getChildByName('CombatLineLabel')?.getComponent(Label) || null;
+    }
+    if (!this.progressLineLabel) {
+      this.progressLineLabel = infoCard?.getChildByName('ProgressLineLabel')?.getComponent(Label) || null;
+    }
+    if (!this.rewardLabel) {
+      this.rewardLabel = rewardCard?.getChildByName('RewardLabel')?.getComponent(Label) || null;
+    }
+    if (!this.restartButton) {
+      this.restartButton = bg?.getChildByName('RestartBtn')?.getComponent(Button) || null;
+    }
+    if (!this.doubleRewardButton) {
+      this.doubleRewardButton = bg?.getChildByName('DoubleRewardBtn')?.getComponent(Button) || null;
+    }
+    if (!this.doubleRewardLabel) {
+      this.doubleRewardLabel = this.doubleRewardButton?.node.getChildByName('Label')?.getComponent(Label) || null;
+    }
+    if (!this.bannerAdSlot) {
+      this.bannerAdSlot = bg?.getChildByName('BannerAdSlot') || this.node.getChildByName('BannerAdSlot') || null;
+    }
   }
 }

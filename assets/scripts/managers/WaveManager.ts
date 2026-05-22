@@ -346,6 +346,5 @@ export class WaveManager {
     this._spawnPlan = [];
     this._activeWaveDef = null;
     this._activeWaveData = null;
-    this._densityProvider = null;
   }
 }
