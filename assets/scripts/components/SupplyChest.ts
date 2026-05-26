@@ -3,11 +3,11 @@
  */
 
 import { _decorator, Color, Component, Graphics, Label, Node, Sprite, SpriteFrame, UITransform, UIOpacity, Vec3, resources } from 'cc';
-import { SupplyChestQuality, SupplyChestType } from '../data/GameConfig';
+import { SupplyChestQuality } from '../data/GameConfig';
 
 const { ccclass } = _decorator;
 
-type ChestVisualKey = 'firepower' | 'control' | 'elite' | 'rare';
+type ChestVisualKey = 'normal' | 'elite' | 'rare' | 'legendary';
 
 interface ImpactSpark {
   x: number;
@@ -23,21 +23,23 @@ interface ImpactSpark {
 
 @ccclass('SupplyChest')
 export class SupplyChest extends Component {
+  private static readonly CHEST_RESOURCE_DIR = 'ui/game/chests_v2';
   private static readonly HIT_ANIM_DURATION = 0.18;
   private static readonly HIT_SHAKE_DURATION = 0.24;
   private static readonly HIT_FX_DURATION = 0.2;
+  private static readonly _instances = new Set<SupplyChest>();
 
-  private static readonly CHEST_RESOURCE_PATHS: Record<ChestVisualKey, string> = {
-    firepower: 'ui/game/chests_v2/chest_firepower_v2',
-    control: 'ui/game/chests_v2/chest_control_v2',
-    elite: 'ui/game/chests_v2/chest_elite_v2',
-    rare: 'ui/game/chests_v2/chest_rare_v2',
+  private static readonly CHEST_FRAME_NAMES: Record<ChestVisualKey, string> = {
+    normal: 'chest_normal_v2',
+    elite: 'chest_elite_v2',
+    rare: 'chest_rare_v2',
+    legendary: 'chest_legendary_v2',
   };
 
   private static readonly _spriteCache: Partial<Record<ChestVisualKey, SpriteFrame | null>> = {};
-  private static readonly _loadingKeys = new Set<ChestVisualKey>();
+  private static _loadingAll = false;
+  private static _loadedAll = false;
 
-  private _type: SupplyChestType = 'firepower';
   private _quality: SupplyChestQuality = 'normal';
   private _serial: number = 0;
   private _x: number = 0;
@@ -62,6 +64,7 @@ export class SupplyChest extends Component {
   private _impactFxNode: Node | null = null;
   private _impactFxGraphics: Graphics | null = null;
   private _titleLabel: Label | null = null;
+  private _hpLabel: Label | null = null;
   private _hpFillGraphics: Graphics | null = null;
   private _hpFillTransform: UITransform | null = null;
   private _opacity: UIOpacity | null = null;
@@ -74,6 +77,7 @@ export class SupplyChest extends Component {
   private _currentVisualKey: ChestVisualKey | null = null;
 
   onLoad(): void {
+    SupplyChest._instances.add(this);
     const transform = this.node.getComponent(UITransform) || this.node.addComponent(UITransform);
     transform.setAnchorPoint(0.5, 0.5);
     this._opacity = this.node.getComponent(UIOpacity) || this.node.addComponent(UIOpacity);
@@ -131,15 +135,29 @@ export class SupplyChest extends Component {
     this._hpFillTransform.setAnchorPoint(0, 0.5);
     this._hpFillGraphics = hpFillNode.getComponent(Graphics) || hpFillNode.addComponent(Graphics);
 
-    this._preloadVisual('firepower');
-    this._preloadVisual('control');
-    this._preloadVisual('elite');
-    this._preloadVisual('rare');
+    const hpLabelNode = this._getOrCreateChild('ChestHpLabel');
+    const hpLabelTransform = hpLabelNode.getComponent(UITransform) || hpLabelNode.addComponent(UITransform);
+    hpLabelTransform.setContentSize(150, 22);
+    hpLabelNode.setPosition(0, 18, 0);
+    this._hpLabel = hpLabelNode.getComponent(Label) || hpLabelNode.addComponent(Label);
+    this._hpLabel.fontSize = 13;
+    this._hpLabel.lineHeight = 16;
+    this._hpLabel.isBold = true;
+    this._hpLabel.enableOutline = true;
+    this._hpLabel.outlineColor = new Color(8, 10, 14, 230);
+    this._hpLabel.outlineWidth = 2;
+    this._hpLabel.horizontalAlign = Label.HorizontalAlign.CENTER;
+    this._hpLabel.verticalAlign = Label.VerticalAlign.CENTER;
+
+    this._preloadVisuals();
     this._refreshTransforms();
   }
 
+  onDestroy(): void {
+    SupplyChest._instances.delete(this);
+  }
+
   init(
-    type: SupplyChestType,
     quality: SupplyChestQuality,
     x: number,
     y: number,
@@ -150,7 +168,6 @@ export class SupplyChest extends Component {
     atk: number,
     attackRate: number
   ): void {
-    this._type = type;
     this._quality = quality;
     this._x = x;
     this._y = y;
@@ -177,6 +194,7 @@ export class SupplyChest extends Component {
     const transform = this.node.getComponent(UITransform);
     transform?.setContentSize(156, 120);
     if (this._opacity) this._opacity.opacity = 255;
+    this._currentVisualKey = this._getVisualKey();
     this._updateVisualSprite();
     this._refreshView();
   }
@@ -287,10 +305,15 @@ export class SupplyChest extends Component {
   private _refreshView(): void {
     const textColor = this._getTextColor();
     const barColor = this._getBarColor();
+    this._updateVisualSprite();
 
     if (this._titleLabel) {
       this._titleLabel.string = this._getTitle();
       this._titleLabel.color = textColor;
+    }
+    if (this._hpLabel) {
+      this._hpLabel.string = `${this._formatCompactValue(this._hp)} / ${this._formatCompactValue(this._maxHp)}`;
+      this._hpLabel.color = new Color(255, 248, 232, 255);
     }
     if (this._visualSprite) {
       this._visualSprite.color = this._flashTimer > 0 ? new Color(255, 236, 210, 255) : new Color(255, 255, 255, 255);
@@ -308,34 +331,52 @@ export class SupplyChest extends Component {
   }
 
   private _getTitle(): string {
-    const typeLabel: Record<SupplyChestType, string> = {
-      firepower: '火力补给',
-      control: '控制补给',
+    const qualityLabel: Record<SupplyChestQuality, string> = {
+      normal: '普通补给',
+      elite: '精英补给',
       rare: '稀有补给',
-      survival: '火力补给',
-      resource: '控制补给',
+      legendary: '传奇补给',
     };
-    return typeLabel[this._type];
+    return qualityLabel[this._quality];
   }
 
   private _getTextColor(): Color {
+    if (this._quality === 'legendary') return new Color(255, 225, 142, 255);
     if (this._quality === 'rare') return new Color(236, 196, 255, 255);
     if (this._quality === 'elite') return new Color(255, 214, 110, 255);
     return new Color(210, 230, 255, 255);
   }
 
   private _getBarColor(): Color {
+    if (this._quality === 'legendary') return new Color(255, 182, 56, 255);
     if (this._quality === 'rare') return new Color(180, 108, 255, 255);
     if (this._quality === 'elite') return new Color(255, 196, 74, 255);
-    if (this._type === 'control' || this._type === 'resource') return new Color(90, 210, 255, 255);
     return new Color(255, 160, 66, 255);
   }
 
   private _getVisualKey(): ChestVisualKey {
+    if (this._quality === 'legendary') return 'legendary';
     if (this._quality === 'rare') return 'rare';
     if (this._quality === 'elite') return 'elite';
-    if (this._type === 'control' || this._type === 'resource') return 'control';
-    return 'firepower';
+    return 'normal';
+  }
+
+  private _formatCompactValue(value: number): string {
+    const safeValue = Math.max(0, Math.round(value));
+    if (safeValue >= 100000000) {
+      return this._formatCompactUnit(safeValue, 100000000, '亿');
+    }
+    if (safeValue >= 10000) {
+      return this._formatCompactUnit(safeValue, 10000, '万');
+    }
+    return `${safeValue}`;
+  }
+
+  private _formatCompactUnit(value: number, unitValue: number, unitLabel: string): string {
+    const scaled = value / unitValue;
+    const digits = scaled >= 100 ? 0 : scaled >= 10 ? 1 : 2;
+    const text = scaled.toFixed(digits).replace(/\.0+$/, '').replace(/(\.\d*[1-9])0+$/, '$1');
+    return `${text}${unitLabel}`;
   }
 
   private _getOrCreateChild(name: string): Node {
@@ -502,26 +543,46 @@ export class SupplyChest extends Component {
 
   private _updateVisualSprite(): void {
     if (!this._visualSprite) return;
-    const key = this._getVisualKey();
+    const key = this._currentVisualKey || this._getVisualKey();
     this._currentVisualKey = key;
     const cached = SupplyChest._spriteCache[key];
     if (cached) {
       this._visualSprite.spriteFrame = cached;
       return;
     }
-    this._preloadVisual(key);
+    this._visualSprite.spriteFrame = null;
+    this._preloadVisuals();
   }
 
-  private _preloadVisual(key: ChestVisualKey): void {
-    if (SupplyChest._spriteCache[key] || SupplyChest._loadingKeys.has(key)) return;
-    SupplyChest._loadingKeys.add(key);
-    resources.load(SupplyChest.CHEST_RESOURCE_PATHS[key], SpriteFrame, (err, frame) => {
-      SupplyChest._loadingKeys.delete(key);
-      if (err || !frame) return;
-      SupplyChest._spriteCache[key] = frame;
-      if (this._visualSprite?.isValid && this._currentVisualKey === key) {
-        this._visualSprite.spriteFrame = frame;
+  private _preloadVisuals(): void {
+    if (SupplyChest._loadedAll || SupplyChest._loadingAll) return;
+    SupplyChest._loadingAll = true;
+    resources.loadDir(SupplyChest.CHEST_RESOURCE_DIR, SpriteFrame, (err, frames) => {
+      SupplyChest._loadingAll = false;
+      if (err || !frames) {
+        console.warn('[SupplyChest] Failed to load chest sprite frames:', err);
+        return;
       }
+
+      const frameMap = new Map(frames.map(frame => [frame.name, frame] as const));
+      (Object.keys(SupplyChest.CHEST_FRAME_NAMES) as ChestVisualKey[]).forEach(key => {
+        const frameName = SupplyChest.CHEST_FRAME_NAMES[key];
+        const frame = frameMap.get(frameName) || null;
+        if (!frame) {
+          console.warn(`[SupplyChest] Missing chest sprite frame: ${frameName}`);
+        }
+        SupplyChest._spriteCache[key] = frame;
+      });
+      SupplyChest._loadedAll = true;
+
+      SupplyChest._instances.forEach(instance => {
+        if (!instance._visualSprite?.isValid) return;
+        const key = instance._currentVisualKey || instance._getVisualKey();
+        const frame = SupplyChest._spriteCache[key];
+        if (frame) {
+          instance._visualSprite.spriteFrame = frame;
+        }
+      });
     });
   }
 
@@ -544,10 +605,6 @@ export class SupplyChest extends Component {
   get hpRatio(): number {
     if (this._maxHp <= 0) return 0;
     return Math.max(0, Math.min(1, this._hp / this._maxHp));
-  }
-
-  get chestType(): SupplyChestType {
-    return this._type;
   }
 
   get quality(): SupplyChestQuality {

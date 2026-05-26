@@ -21,6 +21,7 @@ export class WaveManager {
   private _spawnCount: number = 0;
   private _spawnPlanIndex: number = 0;
   private _spawnPlanProgress: number = 0;
+  private _spawnSlotCursor: number = 0;
   private _wavePause: number = 0;
   private _inPause: boolean = false;
   private _announceTime: number = 0;
@@ -174,6 +175,7 @@ export class WaveManager {
     this._spawnTimer = 0;
     this._spawnPlanIndex = 0;
     this._spawnPlanProgress = 0;
+    this._spawnSlotCursor = 0;
     this._inPause = false;
     this._announceTime = 2.0;
     this._justStarted = true;
@@ -181,7 +183,10 @@ export class WaveManager {
 
     const waveData = this.getWaveData(this._waveIndex);
     const waveDef = this.getWaveDefinition(this._waveIndex);
-    this._activeWaveData = waveData;
+    this._activeWaveData = {
+      ...waveData,
+      spawnInterval: Math.max(0.01, waveDef.spawnInterval || waveData.spawnInterval),
+    };
     this._activeWaveDef = waveDef;
     this._spawnPlan = waveDef.entries.map(entry => ({ ...entry }));
 
@@ -189,6 +194,7 @@ export class WaveManager {
     const formation = this._calcFormation(totalCount);
     this._layout = formation.layout;
     this._totalRows = formation.rows;
+    this._totalSlots = formation.layout.length;
   }
 
   /**
@@ -223,17 +229,18 @@ export class WaveManager {
 
     const waveData = this._activeWaveData || this.getWaveData(this._waveIndex);
 
-    // 生成一行敌人
+    const totalPlanned = this._spawnPlan.reduce((sum, entry) => sum + entry.count, 0);
+
+    // 持续流式生成敌人，避免波次后段出现长时间空窗
     this._spawnTimer += dt;
-    if (this._spawnTimer >= waveData.spawnInterval && this._currentRow < this._totalRows) {
+    if (this._spawnTimer >= waveData.spawnInterval && this._spawnCount < totalPlanned) {
       this._spawnTimer = 0;
-      this._spawnRow(waveData);
-      this._currentRow++;
+      this._spawnBatch(waveData, totalPlanned);
     }
 
     // 检查本波是否全部结束
     const aliveEnemies = this._enemies.filter(e => !e.dead);
-    const waveEnded = this._currentRow >= this._totalRows && aliveEnemies.length === 0;
+    const waveEnded = this._spawnCount >= totalPlanned && aliveEnemies.length === 0;
 
     if (waveEnded) {
       this._waveIndex++;
@@ -245,16 +252,14 @@ export class WaveManager {
   /**
    * 生成一行敌人（按对称布局）
    */
-  private _spawnRow(waveData: WaveData): void {
+  private _spawnBatch(waveData: WaveData, totalPlanned: number): void {
     if (!this._enemyFactory) return;
     if (this._spawnPlan.length === 0) return;
 
     const cfg = GameConfig.bridge;
     const chestCfg = (GameConfig.gameplay.supply.chest || {}) as SupplyChestConfigData;
-    const layout = this._layout;
-    const currentRow = this._currentRow;
-    const totalRows = this._totalRows;
-    const totalSlots = layout.length;  // 固定8个槽位
+    const totalSlots = Math.max(1, this._totalSlots || this._layout.length || 8);
+    const totalRows = Math.max(1, this._totalRows || Math.ceil(totalPlanned / totalSlots));
 
     const laneCount = Math.max(1, cfg.laneCount);
     const bridgeWidth = cfg.right - cfg.left;
@@ -263,28 +268,31 @@ export class WaveManager {
     const enemyLeft = cfg.left + laneWidth * reservedLaneIndex;
     const enemyWidth = Math.max(bridgeWidth * 0.5, cfg.right - enemyLeft);
     const slotWidth = enemyWidth / (totalSlots + 1);
+    const batchSize = this._resolveSpawnBatchSize(totalPlanned);
 
-    // 遍历布局生成敌人
-    for (let slotIndex = 0; slotIndex < layout.length; slotIndex++) {
-      const count = layout[slotIndex];
-      if (count === 0) continue;  // 空位跳过
+    for (let i = 0; i < batchSize; i++) {
+      if (this._spawnCount >= totalPlanned) break;
 
-      // 计算这个槽位的x坐标
+      const slotIndex = this._spawnSlotCursor % totalSlots;
+      const rowIndex = Math.floor(this._spawnCount / totalSlots);
       const x = enemyLeft + slotWidth * (slotIndex + 1);
 
-      // 生成这个位置的敌人（每个槽位1个）
-      for (let i = 0; i < count; i++) {
-        // 检查是否超出总数
-        if (this._spawnCount >= this._spawnPlan.reduce((sum, entry) => sum + entry.count, 0)) break;
-
-        const enemy = this._enemyFactory();
-        const enemyType = this._consumeNextEnemyType();
-        // 传入位置参数
-        enemy.init(waveData, this.currentWaveNum, slotIndex, currentRow, totalSlots, totalRows, x, enemyType);
-        this._enemies.push(enemy);
-        this._spawnCount++;
-      }
+      const enemy = this._enemyFactory();
+      const enemyType = this._consumeNextEnemyType();
+      enemy.init(waveData, this.currentWaveNum, slotIndex, rowIndex, totalSlots, totalRows, x, enemyType);
+      this._enemies.push(enemy);
+      this._spawnCount++;
+      this._spawnSlotCursor++;
     }
+
+    this._currentRow = Math.floor(this._spawnCount / totalSlots);
+  }
+
+  private _resolveSpawnBatchSize(totalPlanned: number): number {
+    if (totalPlanned >= 220) return 4;
+    if (totalPlanned >= 140) return 3;
+    if (totalPlanned >= 70) return 2;
+    return 1;
   }
 
   private _consumeNextEnemyType(): EnemyTypeId {
@@ -335,6 +343,7 @@ export class WaveManager {
     this._spawnCount = 0;
     this._spawnPlanIndex = 0;
     this._spawnPlanProgress = 0;
+    this._spawnSlotCursor = 0;
     this._wavePause = 0;
     this._inPause = false;
     this._announceTime = 0;

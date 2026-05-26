@@ -218,7 +218,7 @@ export const GameConfig = {
     {
       kind: 'normal',
       title: '桥头试探',
-      spawnInterval: 0.01,
+      spawnInterval: 0.5,
       entries: [
         { type: 'normal', count: 400 },
       ],
@@ -448,6 +448,7 @@ export const GameConfig = {
           normal: 1,
           elite: 1,
           rare: 1,
+          legendary: 1,
         },
         laneIndex: 0,
         enemyStartLaneIndex: 1,
@@ -458,14 +459,16 @@ export const GameConfig = {
         refillDelay: 0.45,
         baseHpFactor: 9.5,
         waveGrowth: 0.16,
-        serialGrowth: 0.18,
-        phaseThresholds: [2, 5],
+        serialGrowth: 0.28,
       },
       options: [
         {
           id: 'damage_boost',
           title: '高爆弹药',
           desc: '本关子弹伤害提升25%，可叠加',
+          cardType: 'firepower',
+          star: 2,
+          triggerMode: 'passive',
           assetKey: 'icon_supply_damage',
           assetBrief: '橙色炮弹与爆炸火花，可做64x64图标',
           effect: { type: 'damageMultiplier', value: 1.25 },
@@ -474,6 +477,9 @@ export const GameConfig = {
           id: 'fire_rate_boost',
           title: '快装弹链',
           desc: '本关射速提升20%，可叠加',
+          cardType: 'firepower',
+          star: 1,
+          triggerMode: 'passive',
           assetKey: 'icon_supply_fire_rate',
           assetBrief: '金属弹链、速度线，可做64x64图标',
           effect: { type: 'fireRateMultiplier', value: 1.2 },
@@ -482,14 +488,31 @@ export const GameConfig = {
           id: 'fire_rate_boost_big',
           title: '过载供弹',
           desc: '本关射速提升35%，可叠加',
+          cardType: 'firepower',
+          star: 3,
+          triggerMode: 'passive',
           assetKey: 'icon_supply_fire_rate_big',
           assetBrief: '加速供弹链轮、火花与速度线，可做64x64图标',
           effect: { type: 'fireRateMultiplier', value: 1.35 },
         },
         {
+          id: 'projectile_speed_up',
+          title: '曳光增压',
+          desc: '本关弹药飞行速度提升18%，可叠加',
+          cardType: 'firepower',
+          star: 2,
+          triggerMode: 'passive',
+          assetKey: 'icon_supply_projectile_speed',
+          assetBrief: '暖色弹芯、推进尾迹与速度光束，可做64x64图标',
+          effect: { type: 'projectileSpeedMultiplier', value: 1.18 },
+        },
+        {
           id: 'multishot_up',
           title: '追击连发',
           desc: '本关每轮额外连发1次，可叠加',
+          cardType: 'firepower',
+          star: 3,
+          triggerMode: 'passive',
           assetKey: 'icon_supply_multishot',
           assetBrief: '双层弹链、连续曳光轨迹，可做64x64图标',
           effect: { type: 'multiShotAdd', value: 1 },
@@ -498,30 +521,42 @@ export const GameConfig = {
           id: 'spread_count_up',
           title: '并列弹幕',
           desc: '本关并发弹道+1，可叠加',
+          cardType: 'firepower',
+          star: 3,
+          triggerMode: 'passive',
           assetKey: 'icon_supply_spread_count',
           assetBrief: '多重并列炮口、扇形火线，可做64x64图标',
           effect: { type: 'spreadCountAdd', value: 1 },
         },
         {
-          id: 'knockback_round',
-          title: '冲击弹头',
-          desc: '本关命中附带击退，可叠加',
-          assetKey: 'icon_supply_knockback',
-          assetBrief: '震荡弹头、冲击波环、橙白闪光，可做64x64图标',
-          effect: { type: 'knockback', value: 26 },
+          id: 'freeze_field',
+          title: '冻结力场',
+          desc: '立即冻结全场敌人2.8秒',
+          cardType: 'control',
+          star: 3,
+          triggerMode: 'instant',
+          assetKey: 'icon_supply_slow',
+          assetBrief: '低温力场、冰蓝脉冲与封锁边界，可做64x64图标',
+          effect: { type: 'freezeAll', seconds: 2.8 },
         },
         {
-          id: 'slow_round',
-          title: '粘滞燃烧剂',
-          desc: '本关命中附带减速，可叠加',
-          assetKey: 'icon_supply_slow',
-          assetBrief: '绿色药剂瓶、流体拖尾与火星，可做64x64图标',
-          effect: { type: 'slow', value: 0.8 },
+          id: 'shockwave_blast',
+          title: '震荡清场',
+          desc: '立即震退全场敌人并造成中量伤害',
+          cardType: 'control',
+          star: 4,
+          triggerMode: 'instant',
+          assetKey: 'icon_supply_knockback',
+          assetBrief: '橙白冲击波、破片与外扩气浪，可做64x64图标',
+          effect: { type: 'shockwave', value: 170, damage: 55 },
         },
         {
           id: 'explode_radius_up',
           title: '震爆扩散',
           desc: '爆裂范围提升18%，偏向爆裂流派',
+          cardType: 'firepower',
+          star: 4,
+          triggerMode: 'passive',
           assetKey: 'icon_supply_explode_radius',
           assetBrief: '橙色爆圈、外扩碎片，可做64x64图标',
           effect: { type: 'explodeRadiusMultiplier', value: 1.18 },
@@ -530,6 +565,9 @@ export const GameConfig = {
           id: 'pierce_up',
           title: '穿甲串列',
           desc: '穿透次数+1，偏向穿透流派',
+          cardType: 'firepower',
+          star: 4,
+          triggerMode: 'passive',
           assetKey: 'icon_supply_pierce_up',
           assetBrief: '蓝色贯穿弹道、残影，可做64x64图标',
           effect: { type: 'pierceAdd', value: 1 },
@@ -538,6 +576,9 @@ export const GameConfig = {
           id: 'chain_up',
           title: '电弧增幅',
           desc: '电弧链数+1，偏向电弧流派',
+          cardType: 'firepower',
+          star: 4,
+          triggerMode: 'passive',
           assetKey: 'icon_supply_chain_up',
           assetBrief: '紫色闪电链、能量线圈，可做64x64图标',
           effect: { type: 'chainAdd', value: 1 },
@@ -546,9 +587,23 @@ export const GameConfig = {
           id: 'chain_range_up',
           title: '电容外放',
           desc: '电弧链距提升18%，偏向电弧流派',
+          cardType: 'firepower',
+          star: 4,
+          triggerMode: 'passive',
           assetKey: 'icon_supply_chain_range',
           assetBrief: '放电半径、紫蓝脉冲圈，可做64x64图标',
           effect: { type: 'chainRangeMultiplier', value: 1.18 },
+        },
+        {
+          id: 'airstrike_beacon',
+          title: '空袭信标',
+          desc: '立即呼叫空袭，对全场敌人造成重创',
+          cardType: 'control',
+          star: 5,
+          triggerMode: 'instant',
+          assetKey: 'icon_supply_airstrike',
+          assetBrief: '信标投射、俯冲弹轨与轰炸火海，可做64x64图标',
+          effect: { type: 'airstrike', damage: 180, radius: 96 },
         },
       ],
     },
@@ -594,6 +649,9 @@ export const GameConfig = {
           id: 'weapon_evo_explode',
           title: '进化: 爆裂机炮',
           desc: '命中小范围爆炸，清群更强',
+          cardType: 'firepower',
+          star: 5,
+          triggerMode: 'passive',
           assetKey: 'icon_weapon_evo_explode',
           assetBrief: '橙黄爆裂弹芯、火焰冲击环，可做64x64图标',
           effect: { type: 'weaponEvolution', evolutionId: 'mg_explode' },
@@ -602,6 +660,9 @@ export const GameConfig = {
           id: 'weapon_evo_pierce',
           title: '进化: 穿透机炮',
           desc: '子弹可穿透多个目标',
+          cardType: 'firepower',
+          star: 5,
+          triggerMode: 'passive',
           assetKey: 'icon_weapon_evo_pierce',
           assetBrief: '蓝色穿甲弹头、前冲残影，可做64x64图标',
           effect: { type: 'weaponEvolution', evolutionId: 'mg_pierce' },
@@ -610,6 +671,9 @@ export const GameConfig = {
           id: 'weapon_evo_arc',
           title: '进化: 电弧机炮',
           desc: '命中后链向附近敌人',
+          cardType: 'firepower',
+          star: 5,
+          triggerMode: 'passive',
           assetKey: 'icon_weapon_evo_arc',
           assetBrief: '紫蓝电弧线圈、链式闪电，可做64x64图标',
           effect: { type: 'weaponEvolution', evolutionId: 'mg_arc' },
@@ -801,14 +865,17 @@ export interface SupplyOptionData {
   id: string;
   title: string;
   desc: string;
+  cardType: SupplyCardType;
+  star: SupplyCardStar;
+  triggerMode: SupplyTriggerMode;
   assetKey: string;
   assetBrief: string;
-  phase?: 'early' | 'mid' | 'late';
   effect: {
     type:
       | 'heal'
       | 'damageMultiplier'
       | 'fireRateMultiplier'
+      | 'projectileSpeedMultiplier'
       | 'multiShotAdd'
       | 'spreadCountAdd'
       | 'shield'
@@ -822,20 +889,28 @@ export interface SupplyOptionData {
       | 'pierceAdd'
       | 'chainAdd'
       | 'chainRangeMultiplier'
+      | 'freezeAll'
+      | 'shockwave'
+      | 'airstrike'
       | 'weaponEvolution';
     value?: number;
     waves?: number;
     seconds?: number;
     damage?: number;
+    radius?: number;
     evolutionId?: WeaponEvolutionId;
   };
 }
 
 export type SupplyMode = 'wave_break' | 'chest_trigger';
 
-export type SupplyChestType = 'firepower' | 'survival' | 'control' | 'resource' | 'rare';
+export type SupplyCardType = 'firepower' | 'control';
 
-export type SupplyChestQuality = 'normal' | 'elite' | 'rare';
+export type SupplyCardStar = 1 | 2 | 3 | 4 | 5;
+
+export type SupplyTriggerMode = 'passive' | 'instant';
+
+export type SupplyChestQuality = 'normal' | 'elite' | 'rare' | 'legendary';
 
 export interface SupplyChestConfigData {
   minWave: number;
@@ -860,7 +935,6 @@ export interface SupplyChestConfigData {
   baseHpFactor?: number;
   waveGrowth?: number;
   serialGrowth?: number;
-  phaseThresholds?: number[];
 }
 
 export interface StageRewardBonusData {
