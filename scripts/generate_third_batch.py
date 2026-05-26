@@ -5,6 +5,7 @@ import argparse
 import base64
 import json
 import os
+import time
 from pathlib import Path
 from typing import Any
 
@@ -73,20 +74,30 @@ def post_image_generation(
     base_url: str,
     payload: dict[str, Any],
 ) -> dict[str, Any]:
-    response = requests.post(
-        f"{base_url.rstrip('/')}/images/generations",
-        headers={
-            "Authorization": f"Bearer {api_key}",
-            "Content-Type": "application/json",
-        },
-        json=payload,
-        timeout=300,
-    )
-    response.raise_for_status()
-    data = response.json()
-    if not isinstance(data, dict):
-        raise RuntimeError(f"Unexpected image generation response type: {type(data).__name__}")
-    return data
+    last_error: Exception | None = None
+    for attempt in range(1, 4):
+        try:
+            response = requests.post(
+                f"{base_url.rstrip('/')}/images/generations",
+                headers={
+                    "Authorization": f"Bearer {api_key}",
+                    "Content-Type": "application/json",
+                },
+                json=payload,
+                timeout=300,
+            )
+            response.raise_for_status()
+            data = response.json()
+            if not isinstance(data, dict):
+                raise RuntimeError(f"Unexpected image generation response type: {type(data).__name__}")
+            return data
+        except Exception as exc:
+            last_error = exc
+            if attempt >= 3:
+                break
+            time.sleep(2 * attempt)
+    assert last_error is not None
+    raise last_error
 
 
 def parse_args() -> argparse.Namespace:

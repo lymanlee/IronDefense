@@ -3,7 +3,7 @@
  * 更新波次、血条、关卡击杀进度、武器模式显示
  */
 
-import { _decorator, Component, Label, ProgressBar, Node, Color } from 'cc';
+import { _decorator, Component, Label, ProgressBar, Node, Color, UITransform } from 'cc';
 
 const { ccclass, property } = _decorator;
 
@@ -172,8 +172,44 @@ export class HUDController extends Component {
       return '增益 暂无';
     }
 
-    const parts = compact.split('·').map(part => part.trim()).filter(Boolean);
-    const summary = parts.slice(0, 2).join(' · ');
-    return `增益 ${summary}${parts.length > 2 ? '…' : ''}`;
+    const fullText = `增益 ${compact.split('·').map(part => part.trim()).filter(Boolean).join(' · ')}`;
+    return this._ellipsizeBuffSummary(fullText);
+  }
+
+  private _ellipsizeBuffSummary(text: string): string {
+    const label = this.buffSummaryLabel;
+    if (!label) return text;
+
+    const transform = label.node.getComponent(UITransform);
+    const maxWidth = transform?.contentSize.width || 0;
+    if (maxWidth <= 0) return text;
+
+    const measure = (value: string): number => {
+      label.string = value;
+      label.updateRenderData(true);
+      return label.node.getComponent(UITransform)?.contentSize.width || 0;
+    };
+
+    if (measure(text) <= maxWidth) {
+      return text;
+    }
+
+    const ellipsis = '...';
+    let left = 0;
+    let right = text.length;
+    let best = ellipsis;
+
+    while (left <= right) {
+      const mid = Math.floor((left + right) / 2);
+      const candidate = `${text.slice(0, mid).replace(/\s+$/, '')}${ellipsis}`;
+      if (measure(candidate) <= maxWidth) {
+        best = candidate;
+        left = mid + 1;
+      } else {
+        right = mid - 1;
+      }
+    }
+
+    return best;
   }
 }

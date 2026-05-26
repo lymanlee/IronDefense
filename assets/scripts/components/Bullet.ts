@@ -3,7 +3,7 @@
  * 使用 Sprite + SpriteFrame 渲染（替代 Graphics），支持合批降低 DrawCall
  */
 
-import { _decorator, Component, Color, Sprite } from 'cc';
+import { _decorator, Component, Color, Sprite, UITransform } from 'cc';
 import { GameConfig, WeaponBehavior, WeaponEvolutionData } from '../data/GameConfig';
 
 const { ccclass, property } = _decorator;
@@ -23,6 +23,7 @@ export class Bullet extends Component {
   private _speedMult: number = 1.0; // 速度倍率（用于连发子弹差异化）
   private _lastColorKey: string = ''; // 缓存上次颜色键，避免对象池复用时混色
   private _sprite: Sprite | null = null;
+  private _transform: UITransform | null = null;
   private _behavior: WeaponBehavior = 'normal';
   private _explodeRadius: number = 0;
   private _splashMultiplier: number = 0;
@@ -31,6 +32,11 @@ export class Bullet extends Component {
   private _chainRange: number = 0;
   private _chainMultiplier: number = 0;
   private _evolutionTint: string | null = null;
+  private _prevX: number = 0;
+  private _prevY: number = 0;
+  private _trailTimer: number = 0;
+  private _visualScaleX: number = 1;
+  private _visualScaleY: number = 1;
 
   /**
    * 初始化子弹
@@ -77,9 +83,29 @@ export class Bullet extends Component {
     const rad = (angle * Math.PI) / 180;
     this._vx = this._speed * Math.cos(rad);
     this._vy = this._speed * Math.sin(rad);
+    this._prevX = x;
+    this._prevY = y;
+    this._trailTimer = 0.02;
 
     this.node.setPosition(x, y, 0);
+    this.node.setRotationFromEuler(0, 0, angle - 90);
+    this._ensureVisualComponents();
+    if (this._transform) {
+      this._transform.setContentSize(28, 46);
+    }
+    this._visualScaleX = 0.92;
+    this._visualScaleY = 1.16;
+    this.node.setScale(this._visualScaleX, this._visualScaleY, 1);
     this._applyColor();
+  }
+
+  private _ensureVisualComponents(): void {
+    if (!this._sprite) {
+      this._sprite = this.node.getComponent(Sprite);
+    }
+    if (!this._transform) {
+      this._transform = this.node.getComponent(UITransform);
+    }
   }
 
   /**
@@ -87,10 +113,7 @@ export class Bullet extends Component {
    * 同时缓存等级与分支色，避免对象池复用时沿用旧色
    */
   private _applyColor(): void {
-    // 懒获取 Sprite 组件
-    if (!this._sprite) {
-      this._sprite = this.node.getComponent(Sprite);
-    }
+    this._ensureVisualComponents();
     if (!this._sprite) return;
 
     const colorHex = this.color;
@@ -108,9 +131,17 @@ export class Bullet extends Component {
    * 与 GameManager._bullets.forEach(b => b.tickMove(dt)) 配合，确保每帧只更新一次
    */
   tickMove(dt: number): void {
+    this._prevX = this._x;
+    this._prevY = this._y;
     this._x += this._vx * dt;
     this._y += this._vy * dt;
     this.node.setPosition(this._x, this._y, 0);
+    this._trailTimer += dt;
+
+    const settleRate = Math.min(1, dt * 15);
+    this._visualScaleX += (1 - this._visualScaleX) * settleRate;
+    this._visualScaleY += (1 - this._visualScaleY) * settleRate;
+    this.node.setScale(this._visualScaleX, this._visualScaleY, 1);
 
     // 出界判定：检测所有方向
     const canvasW = GameConfig.canvas.width;
@@ -166,6 +197,28 @@ export class Bullet extends Component {
    */
   get y(): number {
     return this._y;
+  }
+
+  get prevX(): number {
+    return this._prevX;
+  }
+
+  get prevY(): number {
+    return this._prevY;
+  }
+
+  get velocityX(): number {
+    return this._vx;
+  }
+
+  get velocityY(): number {
+    return this._vy;
+  }
+
+  consumeTrail(interval: number): boolean {
+    if (this._trailTimer < interval) return false;
+    this._trailTimer -= interval;
+    return true;
   }
 
   /**
@@ -237,6 +290,13 @@ export class Bullet extends Component {
     this._chainRange = 0;
     this._chainMultiplier = 0;
     this._evolutionTint = null;
+    this._prevX = 0;
+    this._prevY = 0;
+    this._trailTimer = 0;
+    this._visualScaleX = 1;
+    this._visualScaleY = 1;
+    this.node.setScale(1, 1, 1);
+    this.node.setRotationFromEuler(0, 0, 0);
     this.node.setPosition(0, -2000, 0);
   }
 }

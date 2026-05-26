@@ -42,6 +42,9 @@ export class GameManager extends Component {
   @property(Prefab)
   enemyPrefab: Prefab | null = null;
 
+  @property(Prefab)
+  supplyChestPrefab: Prefab | null = null;
+
   @property(Node)
   bulletPoolNode: Node | null = null;
 
@@ -61,6 +64,7 @@ export class GameManager extends Component {
   private _borderROpacity: UIOpacity | null = null;
   private _damageFlashTimer: number = 0;
   private readonly _damageFlashDuration: number = 0.3;
+  private readonly _supplyChestRewardDelay: number = 0.32;
 
   // 游戏状态
   private _state: GameState = 'start';
@@ -87,6 +91,7 @@ export class GameManager extends Component {
   private _pulses: PulseVisualData[] = [];
   private _trails: TrailVisualData[] = [];
   private _lightnings: LightningVisualData[] = [];
+  private _fragments: FragmentVisualData[] = [];
   private _kills: number = 0;
   private _reviveUsed: boolean = false;
   private _baseRunReward: RunReward = { coins: 0, parts: 0 };
@@ -547,6 +552,7 @@ export class GameManager extends Component {
     this._updatePulses(dt);
     this._updateTrails(dt);
     this._updateLightnings(dt);
+    this._updateFragments(dt);
     this._refreshEnemyRenderOrder();
 
     // 清理死亡敌人并回收到对象池（节点保留在父节点下，通过 active 控制显隐）
@@ -656,6 +662,7 @@ export class GameManager extends Component {
   }
 
   private _handleBulletHitChest(bullet: Bullet, chest: SupplyChest): void {
+    this._spawnBulletImpactFx(bullet, chest.x, chest.y, 'chest');
     const destroyed = chest.takeDamage(bullet.damage);
     const canContinue = bullet.behavior === 'pierce' && bullet.consumePierce();
     if (bullet.behavior === 'pierce') {
@@ -671,6 +678,7 @@ export class GameManager extends Component {
   }
 
   private _handleBulletHit(bullet: Bullet, enemy: Enemy): void {
+    this._spawnBulletImpactFx(bullet, enemy.x, enemy.y, 'enemy');
     this._damageEnemy(enemy, bullet.damage);
     if (bullet.behavior === 'explode' && bullet.explodeRadius > 0) {
       this._applyExplosionDamage(
@@ -940,6 +948,54 @@ export class GameManager extends Component {
     });
   }
 
+  private _spawnBulletImpactFx(bullet: Bullet, x: number, y: number, target: 'enemy' | 'chest'): void {
+    const vx = bullet.velocityX;
+    const vy = bullet.velocityY;
+    const speedSq = vx * vx + vy * vy;
+    const speed = speedSq > 0.001 ? Math.sqrt(speedSq) : 1;
+    const dirX = vx / speed;
+    const dirY = vy / speed;
+    const baseColor = bullet.color;
+    const flashColor = target === 'chest' ? '#ffd089' : '#f7fbff';
+    const pulseRadius = target === 'chest' ? 26 : 18;
+    const sparkCount = target === 'chest' ? 8 : 6;
+    const spread = target === 'chest' ? 2.0 : 1.45;
+    const baseLength = target === 'chest' ? 18 : 11;
+    const life = target === 'chest' ? 0.13 : 0.1;
+
+    this._spawnPulse(x, y, pulseRadius, baseColor, life);
+    this._spawnPulse(x, y, pulseRadius * 0.62, flashColor, life * 0.82);
+    this._spawnTrail(
+      x - dirX * 5,
+      y - dirY * 5,
+      x + dirX * 9,
+      y + dirY * 9,
+      flashColor,
+      0.05,
+      target === 'chest' ? 2.4 : 1.9
+    );
+
+    const baseAngle = Math.atan2(dirY, dirX) + Math.PI;
+    for (let i = 0; i < sparkCount; i++) {
+      const angle = baseAngle + (Math.random() - 0.5) * spread;
+      const length = baseLength + Math.random() * (target === 'chest' ? 20 : 12);
+      const startOffset = 2 + Math.random() * 5;
+      const startX = x + dirX * startOffset + (Math.random() - 0.5) * 4;
+      const startY = y + dirY * startOffset + (Math.random() - 0.5) * 4;
+      const endX = startX + Math.cos(angle) * length;
+      const endY = startY + Math.sin(angle) * length;
+      this._spawnTrail(
+        startX,
+        startY,
+        endX,
+        endY,
+        i % 3 === 0 ? flashColor : baseColor,
+        life + Math.random() * 0.04,
+        target === 'chest' ? 2.2 : 1.6
+      );
+    }
+  }
+
   private _spawnLightning(x1: number, y1: number, x2: number, y2: number, color: string, life: number, width: number): void {
     const segments: Vec3[] = [];
     const steps = 4;
@@ -966,6 +1022,35 @@ export class GameManager extends Component {
       const y2 = y + Math.sin(angle) * radius * 0.55;
       this._spawnTrail(x, y, x2, y2, color, 0.16, 3);
     }
+  }
+
+  private _spawnFragment(
+    x: number,
+    y: number,
+    vx: number,
+    vy: number,
+    width: number,
+    height: number,
+    rotation: number,
+    angularVelocity: number,
+    life: number,
+    color: string,
+    edgeColor: string
+  ): void {
+    this._fragments.push({
+      x,
+      y,
+      vx,
+      vy,
+      width,
+      height,
+      rotation,
+      angularVelocity,
+      life,
+      maxLife: life,
+      color,
+      edgeColor,
+    });
   }
 
   private _showFloatingNotice(x: number, y: number, text: string, color: Color): void {
@@ -1156,6 +1241,62 @@ export class GameManager extends Component {
         graphics.moveTo(lightning.points[i].x, lightning.points[i].y);
         graphics.lineTo(lightning.points[i + 1].x, lightning.points[i + 1].y);
       }
+      graphics.stroke();
+      return true;
+    });
+  }
+
+  private _updateFragments(dt: number): void {
+    const graphics = this.explosionGraphicsNode?.getComponent(Graphics);
+    if (!graphics) return;
+
+    const fillColor = new Color();
+    const edgeColor = new Color();
+    this._fragments = this._fragments.filter(fragment => {
+      fragment.life -= dt;
+      if (fragment.life <= 0) return false;
+
+      fragment.x += fragment.vx * dt;
+      fragment.y += fragment.vy * dt;
+      fragment.vx *= 0.988;
+      fragment.vy -= 420 * dt;
+      fragment.rotation += fragment.angularVelocity * dt;
+      fragment.angularVelocity *= 0.992;
+
+      const fade = fragment.life / fragment.maxLife;
+      const hw = fragment.width * (0.86 + fade * 0.18) * 0.5;
+      const hh = fragment.height * (0.86 + fade * 0.18) * 0.5;
+      const cos = Math.cos(fragment.rotation);
+      const sin = Math.sin(fragment.rotation);
+      const corners = [
+        { x: -hw, y: -hh },
+        { x: hw, y: -hh },
+        { x: hw, y: hh },
+        { x: -hw, y: hh },
+      ].map(point => ({
+        x: fragment.x + point.x * cos - point.y * sin,
+        y: fragment.y + point.x * sin + point.y * cos,
+      }));
+
+      fillColor.fromHEX(fragment.color);
+      fillColor.a = Math.floor(220 * fade);
+      graphics.fillColor = fillColor;
+      graphics.moveTo(corners[0].x, corners[0].y);
+      graphics.lineTo(corners[1].x, corners[1].y);
+      graphics.lineTo(corners[2].x, corners[2].y);
+      graphics.lineTo(corners[3].x, corners[3].y);
+      graphics.close();
+      graphics.fill();
+
+      edgeColor.fromHEX(fragment.edgeColor);
+      edgeColor.a = Math.floor(235 * fade);
+      graphics.strokeColor = edgeColor;
+      graphics.lineWidth = 1.4;
+      graphics.moveTo(corners[0].x, corners[0].y);
+      graphics.lineTo(corners[1].x, corners[1].y);
+      graphics.lineTo(corners[2].x, corners[2].y);
+      graphics.lineTo(corners[3].x, corners[3].y);
+      graphics.close();
       graphics.stroke();
       return true;
     });
@@ -1733,9 +1874,17 @@ export class GameManager extends Component {
     const capacity = Math.max(1, this._getSupplyChestConfig().capacity || 1);
     const parent = this.enemiesNode || this._gameLayerNode || director.getScene()?.getChildByName('Canvas');
     while (this._supplyChests.length < capacity) {
-      const chestNode = new Node(`SupplyChest_${this._supplyChests.length}`);
-      chestNode.addComponent(UITransform);
-      const chest = chestNode.addComponent(SupplyChest);
+      const chestNode = this.supplyChestPrefab ? instantiate(this.supplyChestPrefab) : new Node(`SupplyChest_${this._supplyChests.length}`);
+      if (!this.supplyChestPrefab) {
+        chestNode.addComponent(UITransform);
+        chestNode.addComponent(SupplyChest);
+      }
+      chestNode.name = `SupplyChest_${this._supplyChests.length}`;
+      const chest = chestNode.getComponent(SupplyChest);
+      if (!chest) {
+        console.warn('[GameManager] SupplyChest prefab missing SupplyChest component');
+        break;
+      }
       parent?.addChild(chestNode);
       chest.reset();
       this._supplyChests.push(chest);
@@ -1791,13 +1940,96 @@ export class GameManager extends Component {
   private _handleSupplyChestDestroyed(chest: SupplyChest): void {
     const cfg = this._getSupplyChestConfig();
     this._chestSelectionsThisRun++;
-    this._spawnPulse(chest.x, chest.y, chest.radius * 1.8, '#ffd166', 0.25);
-    this._spawnBurstRing(chest.x, chest.y, chest.radius * 1.2, '#ffd166');
+    this._spawnChestDestroyFx(chest);
+    this._freezeBattle();
     chest.reset();
     this._reflowChestTrack();
     this._chestSpawnTimer = 0;
     this._chestSpawnDelay = Math.max(0.15, cfg.refillDelay || 0.45);
-    this._showSupplyChestReward(chest);
+    this.scheduleOnce(() => {
+      if (!this.node?.isValid) return;
+      const shown = this._showSupplyChestReward(chest);
+      if (!shown) {
+        this._state = 'playing';
+        this._unfreezeBattle();
+      }
+    }, this._supplyChestRewardDelay);
+  }
+
+  private _spawnChestDestroyFx(chest: SupplyChest): void {
+    const coreColor = chest.quality === 'rare'
+      ? '#d8a8ff'
+      : chest.quality === 'elite'
+        ? '#ffd36b'
+        : '#ffb65c';
+    const sparkColor = chest.quality === 'rare'
+      ? '#f4d9ff'
+      : chest.quality === 'elite'
+        ? '#fff1b3'
+        : '#fff0d6';
+    const accentColor = chest.quality === 'rare'
+      ? '#79d6ff'
+      : '#6fd3ff';
+    const fragmentColor = chest.quality === 'rare'
+      ? '#655a74'
+      : chest.quality === 'elite'
+        ? '#6c6256'
+        : '#58524c';
+    const fragmentEdgeColor = chest.quality === 'rare'
+      ? '#d7c9ea'
+      : chest.quality === 'elite'
+        ? '#f4dfb4'
+        : '#f0d8bf';
+    const baseRadius = Math.max(54, chest.radius * 1.55);
+
+    this._spawnPulse(chest.x, chest.y, baseRadius * 1.2, coreColor, 0.2);
+    this._spawnPulse(chest.x, chest.y, baseRadius * 1.75, accentColor, 0.28);
+    this._spawnBurstRing(chest.x, chest.y, baseRadius * 0.95, coreColor);
+    this._spawnBurstRing(chest.x, chest.y, baseRadius * 1.25, sparkColor);
+    this._spawnExplosion(chest.x, chest.y);
+
+    const arcCount = chest.quality === 'rare' ? 14 : chest.quality === 'elite' ? 12 : 10;
+    for (let index = 0; index < arcCount; index++) {
+      const angle = (Math.PI * 2 * index) / arcCount + (Math.random() - 0.5) * 0.22;
+      const inner = baseRadius * (0.22 + Math.random() * 0.08);
+      const outer = baseRadius * (0.92 + Math.random() * 0.55);
+      const x1 = chest.x + Math.cos(angle) * inner;
+      const y1 = chest.y + Math.sin(angle) * inner * 0.78;
+      const x2 = chest.x + Math.cos(angle) * outer;
+      const y2 = chest.y + Math.sin(angle) * outer * 0.86;
+      this._spawnTrail(x1, y1, x2, y2, sparkColor, 0.18 + Math.random() * 0.06, 2.4 + Math.random() * 1.6);
+    }
+
+    const shardCount = chest.quality === 'rare' ? 9 : chest.quality === 'elite' ? 8 : 7;
+    for (let index = 0; index < shardCount; index++) {
+      const angle = -Math.PI * 0.82 + (Math.PI * 1.64 * index) / Math.max(1, shardCount - 1) + (Math.random() - 0.5) * 0.18;
+      const distance = baseRadius * (0.65 + Math.random() * 0.45);
+      const x2 = chest.x + Math.cos(angle) * distance;
+      const y2 = chest.y + Math.sin(angle) * distance - Math.random() * 18;
+      this._spawnTrail(chest.x, chest.y, x2, y2, accentColor, 0.14 + Math.random() * 0.05, 1.8 + Math.random() * 1.2);
+    }
+
+    const fragmentCount = chest.quality === 'rare' ? 7 : chest.quality === 'elite' ? 6 : 5;
+    for (let index = 0; index < fragmentCount; index++) {
+      const angle = -Math.PI * 0.74 + (Math.PI * 1.48 * index) / Math.max(1, fragmentCount - 1) + (Math.random() - 0.5) * 0.22;
+      const speed = 135 + Math.random() * 95 + index * 6;
+      const spawnOffset = 10 + Math.random() * 10;
+      const x = chest.x + Math.cos(angle) * spawnOffset;
+      const y = chest.y + Math.sin(angle) * spawnOffset * 0.7;
+      this._spawnFragment(
+        x,
+        y,
+        Math.cos(angle) * speed,
+        Math.sin(angle) * speed * 0.82 + 28,
+        10 + Math.random() * 9,
+        5 + Math.random() * 4,
+        Math.random() * Math.PI,
+        (Math.random() - 0.5) * 11,
+        0.34 + Math.random() * 0.08,
+        fragmentColor,
+        fragmentEdgeColor
+      );
+    }
   }
 
   private _rollNextChestDelay(): number {
@@ -2798,4 +3030,19 @@ interface LightningVisualData {
   maxLife: number;
   width: number;
   color: string;
+}
+
+interface FragmentVisualData {
+  x: number;
+  y: number;
+  vx: number;
+  vy: number;
+  width: number;
+  height: number;
+  rotation: number;
+  angularVelocity: number;
+  life: number;
+  maxLife: number;
+  color: string;
+  edgeColor: string;
 }

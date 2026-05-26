@@ -3,7 +3,7 @@
  * 控制武装车的移动、射击和基础武器档位表现
  */
 
-import { _decorator, Component, Node, Sprite, SpriteFrame, resources, UITransform } from 'cc';
+import { _decorator, Component, Node, Sprite, SpriteFrame, resources, UITransform, tween, Vec3, UIOpacity } from 'cc';
 import { GameConfig } from '../data/GameConfig';
 import { WeaponTierSystem } from './WeaponTierSystem';
 import { Enemy } from './Enemy';
@@ -18,7 +18,12 @@ export interface AttackTarget {
 
 @ccclass('PlayerCar')
 export class PlayerCar extends Component {
-  private static readonly BURST_INTERVAL: number = 0.045;
+  private static readonly BURST_INTERVAL: number = 0.065;
+  private static readonly MUZZLE_FLASH_DURATION: number = 0.08;
+  private static readonly RECOIL_DISTANCE: number = 8;
+  private static readonly RECOIL_COOLDOWN: number = 0.11;
+  private static readonly THRUSTER_FIRE_SCALE: number = 1.12;
+  private static readonly PARALLEL_SHOT_GAP: number = 14;
 
   // 位置
   private _x: number = 0;
@@ -40,7 +45,7 @@ export class PlayerCar extends Component {
   private _damageMultiplier: number = 1;
   private _bonusMultiShot: number = 0;
   private _bonusSpreadCount: number = 0;
-  private _burstQueue: Array<{ angle: number; speedMult: number }> = [];
+  private _burstQueue: Array<Array<{ angle: number; speedMult: number; offsetX: number }>> = [];
   private _burstTimer: number = 0;
 
   // 控制
@@ -64,6 +69,25 @@ export class PlayerCar extends Component {
   private _isFireAnim: boolean = false;  // 是否正在播放开火动画
   private static readonly FIRE_ANIM_FPS: number = 24;  // 开火动画帧率
   private static readonly IDLE_ANIM_FPS: number = 6;   // 待机循环帧率
+  private _idleTime: number = 0;
+  private _muzzleFlashTimer: number = 0;
+  private _recoilTweenActive: boolean = false;
+  private _recoilCooldownTimer: number = 0;
+  private _thrusterFrames: SpriteFrame[] = [];
+  private _muzzleFrames: SpriteFrame[] = [];
+  private _thrusterFrameIndex: number = 0;
+  private _thrusterFrameTimer: number = 0;
+  private _cachedCarBasePos: Vec3 = new Vec3();
+  private _carGraphicsNode: Node | null = null;
+  private _rearThrusterNodes: Node[] = [];
+  private _muzzleFlashNode: Node | null = null;
+  private _rearThrusterSprites: Sprite[] = [];
+  private _cachedThrusterBasePos: Vec3[] = [];
+  private _cachedThrusterBaseScale: Vec3[] = [];
+  private _muzzleFlashSprite: Sprite | null = null;
+  private _muzzleFlashOpacity: UIOpacity | null = null;
+  private _muzzleFlashDefaultScale: Vec3 = new Vec3(1, 1, 1);
+  private _burstVisualStage: number = 0;
 
   onLoad(): void {
     console.log('[PlayerCar] onLoad called');
@@ -80,20 +104,22 @@ export class PlayerCar extends Component {
     if (playerUT) {
       playerUT.setContentSize(cfg.car.width, cfg.car.height);
     }
+    this._bindVisualNodes();
   }
 
   start(): void {
     console.log('[PlayerCar] start called');
     this._loadFrames();
+    this._loadFxFrames();
   }
 
   /**
-   * 加载序列帧图片（resources/car_frames/car_0~7.png）
+   * 加载序列帧图片（resources/car_frames_v3/car_0~1.png）
    */
   private _loadFrames(): void {
-    resources.loadDir('car_frames', SpriteFrame, (err, assets) => {
+    resources.loadDir('car_frames_v3', SpriteFrame, (err, assets) => {
       if (err) {
-        console.error('[PlayerCar] 加载 car_frames 失败:', err);
+        console.error('[PlayerCar] 加载 car_frames_v3 失败:', err);
         return;
       }
       // 过滤 car_ 开头并按数字排序
@@ -108,15 +134,73 @@ export class PlayerCar extends Component {
 
       // 设置第一帧
       if (this._frames.length > 0) {
-        const carGraphics = this.node.getChildByName('CarGraphics');
-        if (carGraphics) {
-          const sprite = carGraphics.getComponent(Sprite);
+        if (this._carGraphicsNode) {
+          const sprite = this._carGraphicsNode.getComponent(Sprite);
           if (sprite) {
             sprite.spriteFrame = this._frames[0];
           }
         }
       }
     });
+  }
+
+  private _loadFxFrames(): void {
+    resources.loadDir('car_fx/muzzle_v2', SpriteFrame, (err, assets) => {
+      if (err) {
+        console.error('[PlayerCar] 加载 muzzle_v2 frames 失败:', err);
+        return;
+      }
+      this._muzzleFrames = (assets as SpriteFrame[])
+        .filter(frame => frame.name && frame.name.startsWith('muzzle_flash_'))
+        .sort((a, b) => a.name.localeCompare(b.name, undefined, { numeric: true }));
+      if (this._muzzleFlashSprite && this._muzzleFrames.length > 0) {
+        this._muzzleFlashSprite.spriteFrame = this._muzzleFrames[0];
+      }
+    });
+
+    resources.loadDir('car_fx/thruster', SpriteFrame, (err, assets) => {
+      if (err) {
+        console.error('[PlayerCar] 加载 thruster frames 失败:', err);
+        return;
+      }
+      this._thrusterFrames = (assets as SpriteFrame[])
+        .filter(frame => frame.name && frame.name.startsWith('thruster_'))
+        .sort((a, b) => a.name.localeCompare(b.name, undefined, { numeric: true }));
+      if (this._thrusterFrames.length > 0) {
+        this._rearThrusterSprites.forEach(sprite => {
+          sprite.spriteFrame = this._thrusterFrames[0];
+        });
+      }
+    });
+
+  }
+
+  private _bindVisualNodes(): void {
+    this._carGraphicsNode = this.node.getChildByName('CarGraphics');
+    this._rearThrusterNodes = this.node.children.filter(child => child.name === 'RearThruster');
+    this._muzzleFlashNode = this.node.getChildByName('MuzzleFlash');
+
+    this._rearThrusterSprites = this._rearThrusterNodes
+      .map(node => node.getComponent(Sprite))
+      .filter((sprite): sprite is Sprite => !!sprite);
+    this._muzzleFlashSprite = this._muzzleFlashNode?.getComponent(Sprite) || null;
+    this._muzzleFlashOpacity = this._muzzleFlashNode?.getComponent(UIOpacity) || null;
+
+    if (this._muzzleFlashNode && !this._muzzleFlashOpacity) {
+      this._muzzleFlashOpacity = this._muzzleFlashNode.addComponent(UIOpacity);
+    }
+
+    if (this._muzzleFlashNode && this._muzzleFlashOpacity) {
+      this._muzzleFlashOpacity.opacity = 0;
+      this._muzzleFlashNode.active = false;
+      this._muzzleFlashDefaultScale = this._muzzleFlashNode.scale.clone();
+    }
+
+    if (this._carGraphicsNode) {
+      this._cachedCarBasePos = this._carGraphicsNode.position.clone();
+    }
+    this._cachedThrusterBasePos = this._rearThrusterNodes.map(node => node.position.clone());
+    this._cachedThrusterBaseScale = this._rearThrusterNodes.map(node => node.scale.clone());
   }
 
   /**
@@ -149,12 +233,14 @@ export class PlayerCar extends Component {
     if (this._invulnerableTimer > 0) {
       this._invulnerableTimer = Math.max(0, this._invulnerableTimer - dt);
     }
+    if (this._recoilCooldownTimer > 0) {
+      this._recoilCooldownTimer = Math.max(0, this._recoilCooldownTimer - dt);
+    }
 
     this._updateBurstQueue(dt);
 
-    const { width } = GameConfig.canvas;
     const { left, right } = GameConfig.bridge;
-    const halfW = GameConfig.car.width / 2;
+    const movePadding = Math.max(0, GameConfig.car.movePadding ?? GameConfig.car.width / 2);
 
     // 键盘移动
     if (this._keyLeft) this._x -= GameConfig.car.speed * dt;
@@ -171,19 +257,21 @@ export class PlayerCar extends Component {
     }
 
     // 限制范围
-    this._x = Math.max(left + halfW, Math.min(right - halfW, this._x));
+    this._x = Math.max(left + movePadding, Math.min(right - movePadding, this._x));
 
     // 更新位置
     this.node.setPosition(this._x, this._y, 0);
 
     // 更新序列帧动画
     this._updateFrameAnimation(dt);
+    this._updateIdleVisuals(dt);
+    this._updateFx(dt);
   }
 
   /**
    * 更新序列帧动画
-   * 开火状态：快速播放全部帧（24fps）
-   * 待机状态：循环 car_0（6fps，保持呼吸感）
+   * 开火状态：快速切换两帧并交给火光/后坐力补足体感
+   * 待机状态：两帧慢速交替，提供轻微机械呼吸感
    */
   private _updateFrameAnimation(dt: number): void {
     if (this._frames.length === 0) return;
@@ -204,13 +292,16 @@ export class PlayerCar extends Component {
         this._frameIndex = 0;
       }
     } else {
-      // 待机：始终显示 car_0
-      this._frameIndex = 0;
+      // 待机：慢速交替两帧
+      if (this._frames.length > 1) {
+        this._frameIndex = (this._frameIndex + 1) % Math.min(2, this._frames.length);
+      } else {
+        this._frameIndex = 0;
+      }
     }
 
-    const carGraphics = this.node.getChildByName('CarGraphics');
-    if (carGraphics) {
-      const sprite = carGraphics.getComponent(Sprite);
+    if (this._carGraphicsNode) {
+      const sprite = this._carGraphicsNode.getComponent(Sprite);
       if (sprite && this._frames[this._frameIndex]) {
         sprite.spriteFrame = this._frames[this._frameIndex];
       }
@@ -220,10 +311,105 @@ export class PlayerCar extends Component {
   /**
    * 触发开火动画（每次发射子弹时调用）
    */
-  private _playFireAnim(): void {
+  private _playFireAnim(burstStage: number = 0, burstTotal: number = 1): void {
     this._isFireAnim = true;
     this._frameIndex = 0;
     this._frameTimer = 0;
+    this._playMuzzleFlash(burstStage, burstTotal);
+    this._playRecoil(burstStage, burstTotal);
+  }
+
+  private _updateIdleVisuals(dt: number): void {
+    this._idleTime += dt;
+
+    if (this._carGraphicsNode && !this._recoilTweenActive) {
+      this._carGraphicsNode.setPosition(this._cachedCarBasePos);
+    }
+
+    this._rearThrusterNodes.forEach((node, index) => {
+      if (!this._recoilTweenActive) {
+        node.setPosition(this._cachedThrusterBasePos[index] || node.position);
+        node.setScale(this._cachedThrusterBaseScale[index] || node.scale);
+      }
+    });
+  }
+
+  private _updateFx(dt: number): void {
+    if (this._thrusterFrames.length > 0 && this._rearThrusterSprites.length > 0) {
+      this._thrusterFrameTimer += dt;
+      if (this._thrusterFrameTimer >= 0.09) {
+        this._thrusterFrameTimer = 0;
+        this._thrusterFrameIndex = (this._thrusterFrameIndex + 1) % this._thrusterFrames.length;
+        this._rearThrusterSprites.forEach(sprite => {
+          sprite.spriteFrame = this._thrusterFrames[this._thrusterFrameIndex];
+        });
+      }
+    }
+
+    if (this._muzzleFlashTimer > 0) {
+      this._muzzleFlashTimer = Math.max(0, this._muzzleFlashTimer - dt);
+      if (this._muzzleFlashTimer <= 0 && this._muzzleFlashNode && this._muzzleFlashOpacity) {
+        this._muzzleFlashOpacity.opacity = 0;
+        this._muzzleFlashNode.active = false;
+      }
+    }
+  }
+
+  private _playMuzzleFlash(burstStage: number = 0, burstTotal: number = 1): void {
+    if (!this._muzzleFlashNode || !this._muzzleFlashOpacity) return;
+    if (this._muzzleFrames.length > 0 && this._muzzleFlashSprite) {
+      const nextIndex = Math.floor(Math.random() * this._muzzleFrames.length);
+      this._muzzleFlashSprite.spriteFrame = this._muzzleFrames[nextIndex];
+    }
+    const stageRatio = burstTotal > 1 ? burstStage / Math.max(1, burstTotal - 1) : 0;
+    const flashBoost = burstTotal > 1 ? 1 + stageRatio * 0.22 : 1;
+    this._muzzleFlashTimer = PlayerCar.MUZZLE_FLASH_DURATION;
+    this._muzzleFlashNode.active = true;
+    this._muzzleFlashOpacity.opacity = 255;
+    this._muzzleFlashNode.setScale(
+      this._muzzleFlashDefaultScale.x * (0.95 + Math.random() * 0.24) * flashBoost,
+      this._muzzleFlashDefaultScale.y * (0.95 + Math.random() * 0.18) * flashBoost,
+      this._muzzleFlashDefaultScale.z
+    );
+  }
+
+  private _playRecoil(burstStage: number = 0, burstTotal: number = 1): void {
+    if (!this._carGraphicsNode || this._recoilCooldownTimer > 0) return;
+    const stageRatio = burstTotal > 1 ? burstStage / Math.max(1, burstTotal - 1) : 0;
+    const recoilDistance = PlayerCar.RECOIL_DISTANCE + (burstTotal > 1 ? stageRatio * 2.4 : 0);
+    const thrusterOffset = 6 + (burstTotal > 1 ? stageRatio * 1.8 : 0);
+    const thrusterScale = PlayerCar.THRUSTER_FIRE_SCALE + (burstTotal > 1 ? stageRatio * 0.08 : 0);
+    this._recoilCooldownTimer = Math.max(0.05, PlayerCar.RECOIL_COOLDOWN - (burstTotal > 1 ? 0.02 : 0));
+    this._recoilTweenActive = true;
+    tween(this._carGraphicsNode)
+      .stop()
+      .to(0.032, { position: new Vec3(this._cachedCarBasePos.x, this._cachedCarBasePos.y - recoilDistance, this._cachedCarBasePos.z) })
+      .to(0.14, { position: this._cachedCarBasePos.clone() })
+      .call(() => {
+        this._recoilTweenActive = false;
+      })
+      .start();
+
+    this._rearThrusterNodes.forEach((node, index) => {
+      const basePos = this._cachedThrusterBasePos[index] || node.position.clone();
+      const baseScale = this._cachedThrusterBaseScale[index] || node.scale.clone();
+      tween(node)
+        .stop()
+        .to(0.032, {
+          position: new Vec3(basePos.x, basePos.y - thrusterOffset, basePos.z),
+          scale: new Vec3(
+            baseScale.x * thrusterScale,
+            baseScale.y * thrusterScale,
+            baseScale.z
+          ),
+        })
+        .to(0.14, {
+          position: basePos.clone(),
+          scale: baseScale.clone(),
+        })
+        .start();
+    });
+
   }
 
   /**
@@ -252,7 +438,7 @@ export class PlayerCar extends Component {
     const pattern = this._weaponTierSystem.firePattern;
     const baseAngle = 90; // 基准角度：垂直向上
     const count = pattern.count;
-    const multiShot = pattern.multiShot + this._bonusMultiShot;
+    const parallelCount = Math.max(1, pattern.multiShot + this._bonusMultiShot);
     const speedMults = pattern.speedMults;
     const finalCount = count + this._bonusSpreadCount;
     const spread = this._resolveSpreadAngle(finalCount, pattern.spread);
@@ -267,13 +453,24 @@ export class PlayerCar extends Component {
     }
 
     this._burstQueue = [];
-    for (let m = 0; m < multiShot; m++) {
+    const burstPhases = parallelCount >= 4 ? 2 : 1;
+    const phaseGroups: Array<Array<{ angle: number; speedMult: number; offsetX: number }>> = Array.from(
+      { length: burstPhases },
+      () => []
+    );
+    const offsets = this._buildParallelOffsets(parallelCount);
+    for (let index = 0; index < offsets.length; index++) {
+      const offsetX = offsets[index];
+      const phaseIndex = burstPhases === 1 ? 0 : index % burstPhases;
+      const phaseLayer = burstPhases === 1 ? 0 : Math.floor(index / burstPhases);
       for (const angle of angles) {
-        const speedBase = speedMults[m] ?? 1.0;
-        const speedMult = Math.max(0.82, speedBase - m * 0.03);
-        this._burstQueue.push({ angle, speedMult });
+        const speedBase = speedMults[Math.min(index, speedMults.length - 1)] ?? 1.0;
+        const speedMult = Math.max(0.86, speedBase - phaseLayer * 0.015);
+        phaseGroups[phaseIndex].push({ angle, speedMult, offsetX });
       }
     }
+    this._burstQueue = phaseGroups.filter(group => group.length > 0);
+    this._burstVisualStage = 0;
     this._fireBurstShot();
     this._burstTimer = PlayerCar.BURST_INTERVAL;
 
@@ -282,7 +479,7 @@ export class PlayerCar extends Component {
     }
 
     // 触发开火动画
-    this._playFireAnim();
+    this._playFireAnim(this._burstVisualStage, Math.max(1, this._burstQueue.length));
   }
 
   /**
@@ -315,19 +512,39 @@ export class PlayerCar extends Component {
     if (this._burstQueue.length === 0) return;
     this._burstTimer -= dt;
     if (this._burstTimer > 0) return;
+    const totalBurst = Math.max(1, this._burstQueue.length + 1);
+    this._burstVisualStage = Math.min(totalBurst - 1, this._burstVisualStage + 1);
     this._fireBurstShot();
     if (this._burstQueue.length > 0) {
       this._burstTimer = PlayerCar.BURST_INTERVAL;
-      this._playFireAnim();
+      this._playFireAnim(this._burstVisualStage, totalBurst);
     }
   }
 
   private _fireBurstShot(): void {
     if (!this._onFire || !this._weaponTierSystem) return;
-    const remaining = this._burstQueue.splice(0, Math.max(1, this._weaponTierSystem.firePattern.count + this._bonusSpreadCount));
-    for (const shot of remaining) {
-      this._onFire(this._x, this._y + GameConfig.car.height / 2, this._weaponTierSystem.tierIndex, shot.angle, shot.speedMult);
+    const volley = this._burstQueue.shift();
+    if (!volley) return;
+    for (const shot of volley) {
+      this._onFire(
+        this._x + shot.offsetX,
+        this._y + GameConfig.car.height / 2,
+        this._weaponTierSystem.tierIndex,
+        shot.angle,
+        shot.speedMult
+      );
     }
+  }
+
+  private _buildParallelOffsets(count: number): number[] {
+    if (count <= 1) return [0];
+    const center = (count - 1) / 2;
+    const gap = PlayerCar.PARALLEL_SHOT_GAP;
+    const offsets: number[] = [];
+    for (let i = 0; i < count; i++) {
+      offsets.push((i - center) * gap);
+    }
+    return offsets;
   }
 
   /**
@@ -490,6 +707,7 @@ export class PlayerCar extends Component {
     this._bonusSpreadCount = 0;
     this._burstQueue = [];
     this._burstTimer = 0;
+    this._burstVisualStage = 0;
     this._dragging = false;
     this._lastTouchX = 0;
     this._lastTouchMoveTime = 0;
@@ -502,13 +720,27 @@ export class PlayerCar extends Component {
     this.node.setPosition(this._x, this._y, 0);
     // 重置到第一帧
     if (this._frames.length > 0) {
-      const carGraphics = this.node.getChildByName('CarGraphics');
-      if (carGraphics) {
-        const sprite = carGraphics.getComponent(Sprite);
+      if (this._carGraphicsNode) {
+        const sprite = this._carGraphicsNode.getComponent(Sprite);
         if (sprite) {
           sprite.spriteFrame = this._frames[0];
         }
       }
     }
+    this._rearThrusterNodes.forEach((node, index) => {
+      node.setPosition(this._cachedThrusterBasePos[index] || node.position);
+      node.setScale(this._cachedThrusterBaseScale[index] || new Vec3(1, 1, 1));
+    });
+    if (this._muzzleFlashNode && this._muzzleFlashOpacity) {
+      this._muzzleFlashTimer = 0;
+      this._muzzleFlashOpacity.opacity = 0;
+      this._muzzleFlashNode.active = false;
+      this._muzzleFlashNode.setScale(this._muzzleFlashDefaultScale);
+    }
+    this._idleTime = 0;
+    this._thrusterFrameIndex = 0;
+    this._thrusterFrameTimer = 0;
+    this._recoilTweenActive = false;
+    this._recoilCooldownTimer = 0;
   }
 }

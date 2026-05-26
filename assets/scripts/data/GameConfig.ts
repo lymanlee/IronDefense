@@ -17,7 +17,7 @@ export const GameConfig = {
   // ============================================
   bridge: {
     left: -280,       // 桥左边界 x（原 80 - 360）
-    right: 280,       // 桥右边界 x（原 640 - 360）
+    right: 300,       // 桥右边界 x（原 640 - 360）
     top: 430,         // 桥顶端 y（下移出生区，避免压住 HUD）
     laneCount: 5,     // 桥面列数
     railY: -520,      // 护栏 y 坐标（屏幕下方）
@@ -30,6 +30,7 @@ export const GameConfig = {
   car: {
     width: 106,        // 实际显示宽度（保持纵横比，统一画布）
     height: 112,      // 实际显示高度（含火焰特效）
+    movePadding: 5,  // 左右移动边界留白，独立于显示宽度，避免手感过窄
     speed: 440,       // 键盘移动速度 px/s
     hp: 200,          // 血量
   },
@@ -451,7 +452,7 @@ export const GameConfig = {
         laneIndex: 0,
         enemyStartLaneIndex: 1,
         capacity: 5,
-        slotGap: 26,
+        slotGap: 100,
         topOffset: 24,
         stopRatio: 0.82,
         refillDelay: 0.45,
@@ -729,7 +730,7 @@ export const GameConfig = {
   // 子弹默认颜色（按基础武器档位）
   // 若已获得武器分支，则优先使用分支 tint 覆盖
   // ============================================
-  bulletColors: ['#ffe94d', '#ffb300', '#ff7043', '#e040fb', '#40c4ff', '#ff4081'],
+  bulletColors: ['#ffb11a', '#ff8a1f', '#ff6b2e', '#ff5a36', '#ff7a3a', '#ff6a52'],
 
   // ============================================
   // 爆炸粒子颜色
