@@ -1,6 +1,6 @@
 /**
  * HUDController.ts - HUD 控制器
- * 更新波次、血条、关卡击杀进度、武器模式显示
+ * 更新波次、生命值与关卡完成进度等 HUD 信息
  */
 
 import { _decorator, Component, Label, ProgressBar, Node, Color, UITransform } from 'cc';
@@ -70,6 +70,7 @@ export class HUDController extends Component {
     this._ensureHUDRefs();
     if (this.stageLabel) {
       this.stageLabel.string = stageLabel;
+      this.stageLabel.node.active = false;
     }
 
     // 波次
@@ -79,7 +80,7 @@ export class HUDController extends Component {
 
     // 血量数值：展示当前/上限，方便快速判断容错
     if (this.hpLabel) {
-      this.hpLabel.string = `${Math.ceil(hp)}/${Math.ceil(maxHp)}`;
+      this.hpLabel.string = `生命值 ${Math.ceil(hp)}/${Math.ceil(maxHp)}`;
     }
 
     // 关卡击杀进度
@@ -111,6 +112,7 @@ export class HUDController extends Component {
     // 武器模式：琥珀金色，与游戏主题一致
     if (this.weaponLabel) {
       this.weaponLabel.string = `火力 ${weaponName}`;
+      this.weaponLabel.node.active = false;
     }
 
     if (this.enemyHintLabel) {
@@ -156,9 +158,9 @@ export class HUDController extends Component {
   private _compactKillProgress(text: string): string {
     const match = text.match(/(\d+)\s*\/\s*(\d+)/);
     if (!match) {
-      return text.replace(/^本关击杀:\s*/, '').trim();
+      return `完成进度 ${text.replace(/^本关击杀:\s*/, '').trim()}`;
     }
-    return `击毁 ${match[1]}/${match[2]}`;
+    return `完成进度 ${match[1]}/${match[2]}`;
   }
 
   private _compactEnemyHint(text: string): string {

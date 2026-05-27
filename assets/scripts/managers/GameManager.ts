@@ -3,7 +3,7 @@
  * 协调所有游戏系统，主循环，状态机
  */
 
-import { _decorator, Component, Node, instantiate, Prefab, tween, Vec3, Color, Tween, input, Input, KeyCode, director, Sprite, UIOpacity, UITransform, SpriteFrame, Graphics, Label, Button, resources } from 'cc';
+import { _decorator, Component, Node, instantiate, Prefab, tween, Vec3, Color, Tween, input, Input, KeyCode, director, Sprite, UIOpacity, UITransform, Graphics, Label, Button } from 'cc';
 import { GameConfig, PermanentUpgradeId, SupplyCardStar, SupplyCardType, SupplyChestConfigData, SupplyChestQuality, SupplyMode, SupplyOptionData, WaveDefinitionData, WeaponEvolutionData, WeaponEvolutionId } from '../data/GameConfig';
 import { WeaponTierSystem } from '../components/WeaponTierSystem';
 import { AttackTarget, PlayerCar } from '../components/PlayerCar';
@@ -135,6 +135,9 @@ export class GameManager extends Component {
   private _supplyPanelSubTitleLabel: Label | null = null;
   private _supplyPanelStatusLabel: Label | null = null;
   private _supplyPanelAdButton: Node | null = null;
+  private _supplyPanelAdButtonLabel: Label | null = null;
+  private _supplyPanelAdHintLabel: Label | null = null;
+  private _supplyPanelAdCountLabel: Label | null = null;
   private _waveBannerNode: Node | null = null;
   private _waveSupportTimers: Map<string, number> = new Map();
   private _supplyChests: SupplyChest[] = [];
@@ -283,7 +286,6 @@ export class GameManager extends Component {
           });
           this._gameOverScreen.setOnMenu(() => {
             this._audioManager?.stopBGM();
-            this._adsManager.showInterstitial('returnMenu');
             this._state = 'start';
             if (this._gameOverScreen) this._gameOverScreen.hide();
             if (this._hud) this._hud.node.active = false;
@@ -1496,94 +1498,109 @@ export class GameManager extends Component {
   private _showSupplyPanel(nextWave: number): boolean {
     this._cacheSupplyPanelRefs();
     if (!this._supplyPanelNode?.isValid) return false;
-    const choices = this._pickSupplyOptions();
-    if (choices.length === 0) return false;
+    let currentChoices = this._pickSupplyOptions();
+    if (currentChoices.length === 0) return false;
     this._freezeBattle();
     this._adsManager.showBanner('supply');
-    const picked = new Set<string>();
-    let freePicked = false;
     this._state = 'supply';
-    this._populateSupplyPanel(
-      `第${nextWave}波前补给`,
-      this._getStageEnemyHint(),
-      '补给仅本关生效',
-      '请选择一张补给卡',
-      choices,
-      async () => {
-        if (!freePicked) {
-          if (this._supplyPanelStatusLabel) this._supplyPanelStatusLabel.string = '请先选择一张补给卡';
-          return;
-        }
-        if (this._supplyAdExtrasUsed >= GameConfig.gameplay.supply.maxAdExtrasPerRun + this._bonusAdSupplyCount) {
-          if (this._supplyPanelStatusLabel) this._supplyPanelStatusLabel.string = '本局广告升级次数已用完';
-          return;
-        }
-        this._state = 'ad';
-        const completed = await this._adsManager.showRewarded('supply');
-        this._state = 'supply';
-        if (!completed) return;
-        const extra = choices.find(option => !picked.has(option.id));
-        if (extra) {
-          picked.add(extra.id);
-          this._applySupplyOption(extra);
+    let refreshQuality: SupplyChestQuality = 'normal';
+    let refreshSerial = 0;
+    const renderPanel = (statusText: string): void => {
+      this._populateSupplyPanel(
+        `第${nextWave}波前补给`,
+        this._getStageEnemyHint(),
+        '补给仅本关生效',
+        statusText,
+        currentChoices,
+        async () => {
+          if (this._getSupplyAdRefreshRemaining() <= 0) {
+            this._refreshSupplyAdArea();
+            if (this._supplyPanelStatusLabel) this._supplyPanelStatusLabel.string = '本局广告刷新次数已用完';
+            return;
+          }
+          this._state = 'ad';
+          const completed = await this._adsManager.showRewarded('supply');
+          this._state = 'supply';
+          if (!completed) {
+            this._refreshSupplyAdArea();
+            return;
+          }
           this._supplyAdExtrasUsed++;
+          refreshQuality = this._getSupplyAdRefreshQuality(refreshQuality);
+          refreshSerial += 2;
+          const refreshed = this._pickSupplyOptions(refreshQuality, refreshSerial + this._supplyAdExtrasUsed);
+          if (refreshed.length === 0) {
+            this._refreshSupplyAdArea();
+            if (this._supplyPanelStatusLabel) this._supplyPanelStatusLabel.string = '暂无可刷新的补给卡';
+            return;
+          }
+          currentChoices = refreshed;
+          renderPanel(`已刷新补给卡 · ${this._getChestQualityName(refreshQuality)}品质概率提升`);
+        },
+        (option, nodes) => {
+          this._applySupplyOption(option);
+          if (this._supplyPanelStatusLabel) this._supplyPanelStatusLabel.string = `已获得: ${option.title}`;
+          nodes.forEach(node => this._setButtonEnabled(node, false));
+          this._closeSupplyPanel(true);
         }
-        this._closeSupplyPanel(true);
-      },
-      (option, nodes) => {
-        if (freePicked) return;
-        freePicked = true;
-        picked.add(option.id);
-        this._applySupplyOption(option);
-        if (this._supplyPanelStatusLabel) this._supplyPanelStatusLabel.string = `已获得: ${option.title}`;
-        nodes.forEach(node => this._setButtonEnabled(node, false));
-        this._closeSupplyPanel(true);
-      }
-    );
+      );
+    };
+    renderPanel('请选择一张补给卡');
     return true;
   }
 
   private _showSupplyChestReward(chest: SupplyChest): boolean {
     this._cacheSupplyPanelRefs();
     if (!this._supplyPanelNode?.isValid) return false;
-    const choices = this._pickSupplyOptions(chest.quality, chest.serial);
-    if (choices.length === 0) {
+    let currentQuality = chest.quality;
+    let currentSerial = chest.serial;
+    let currentChoices = this._pickSupplyOptions(currentQuality, currentSerial);
+    if (currentChoices.length === 0) {
       this._showFloatingNotice(chest.x, chest.y + 44, '暂无可用补给', new Color(255, 228, 150));
       return false;
     }
     this._freezeBattle();
     this._adsManager.showBanner('supply');
-    this._populateSupplyPanel(
-      `${this._getChestQualityName(chest.quality)}补给开启`,
-      this._getStageEnemyHint(),
-      `${this._getChestQualityName(chest.quality)}补给，当前关卡内生效`,
-      '选择一张补给卡',
-      choices,
-      async () => {
-        if (!this._getUpgradedChestQuality(chest.quality)) {
-          if (this._supplyPanelStatusLabel) this._supplyPanelStatusLabel.string = '传奇补给已是最高级';
-          return;
+    const renderPanel = (statusText: string): void => {
+      this._populateSupplyPanel(
+        `${this._getChestQualityName(currentQuality)}补给开启`,
+        this._getStageEnemyHint(),
+        `${this._getChestQualityName(currentQuality)}补给，当前关卡内生效`,
+        statusText,
+        currentChoices,
+        async () => {
+          if (this._getSupplyAdRefreshRemaining() <= 0) {
+            this._refreshSupplyAdArea();
+            if (this._supplyPanelStatusLabel) this._supplyPanelStatusLabel.string = '本局广告刷新次数已用完';
+            return;
+          }
+          this._state = 'ad';
+          const completed = await this._adsManager.showRewarded('supply');
+          this._state = 'supply';
+          if (!completed) {
+            this._refreshSupplyAdArea();
+            return;
+          }
+          this._supplyAdExtrasUsed++;
+          currentQuality = this._getSupplyAdRefreshQuality(currentQuality);
+          currentSerial += 2;
+          const refreshed = this._pickSupplyOptions(currentQuality, currentSerial + this._supplyAdExtrasUsed);
+          if (refreshed.length === 0) {
+            this._refreshSupplyAdArea();
+            if (this._supplyPanelStatusLabel) this._supplyPanelStatusLabel.string = '暂无可刷新的补给卡';
+            return;
+          }
+          currentChoices = refreshed;
+          renderPanel(`已刷新补给卡 · ${this._getChestQualityName(currentQuality)}品质概率提升`);
+        },
+        (option) => {
+          this._applySupplyOption(option);
+          this._showFloatingNotice(chest.x, chest.y + 44, option.title, new Color(255, 228, 150));
+          this._closeSupplyPanel(true);
         }
-        if (this._supplyAdExtrasUsed >= GameConfig.gameplay.supply.maxAdExtrasPerRun + this._bonusAdSupplyCount) {
-          if (this._supplyPanelStatusLabel) this._supplyPanelStatusLabel.string = '本局广告升级次数已用完';
-          return;
-        }
-        this._state = 'ad';
-        const completed = await this._adsManager.showRewarded('supply');
-        this._state = 'supply';
-        if (!completed) return;
-        this._supplyAdExtrasUsed++;
-        this._closeSupplyPanel(false);
-        if (!this._showAdvancedSupplyChestReward(chest)) {
-          this._state = 'playing';
-        }
-      },
-      (option) => {
-        this._applySupplyOption(option);
-        this._showFloatingNotice(chest.x, chest.y + 44, option.title, new Color(255, 228, 150));
-        this._closeSupplyPanel(true);
-      }
-    );
+      );
+    };
+    renderPanel('选择一张补给卡');
     this._state = 'supply';
     return true;
   }
@@ -1623,9 +1640,14 @@ export class GameManager extends Component {
 
   private _pickSupplyOptions(chestQuality: SupplyChestQuality = 'normal', chestSerial: number = 0): SupplyOptionData[] {
     const desiredCount = Math.max(1, GameConfig.gameplay.supply.choiceCount + this._bonusSupplyChoices);
-    const options = [...(GameConfig.gameplay.supply.options as SupplyOptionData[])].filter(option => this._canOfferSupplyOption(option));
+    const maxAllowedStar = this._getMaxSupplyStarForChestQuality(chestQuality);
+    const options = [...(GameConfig.gameplay.supply.options as SupplyOptionData[])]
+      .filter(option => option.star <= maxAllowedStar && this._canOfferSupplyOption(option));
     if (chestSerial >= 2 && !this._weaponEvolutionId) {
-      options.push(...(GameConfig.gameplay.weaponEvolution.options as SupplyOptionData[]).filter(option => this._canOfferSupplyOption(option)));
+      options.push(
+        ...(GameConfig.gameplay.weaponEvolution.options as SupplyOptionData[])
+          .filter(option => option.star <= maxAllowedStar && this._canOfferSupplyOption(option))
+      );
     }
     if (options.length === 0) return [];
 
@@ -1788,25 +1810,27 @@ export class GameManager extends Component {
     }
   }
 
+  private _getSupplyAdRefreshQuality(baseQuality: SupplyChestQuality): SupplyChestQuality {
+    return this._getUpgradedChestQuality(baseQuality) || baseQuality;
+  }
+
+  private _getSupplyAdRefreshRemaining(): number {
+    return Math.max(0, GameConfig.gameplay.supply.maxAdExtrasPerRun + this._bonusAdSupplyCount - this._supplyAdExtrasUsed);
+  }
+
   private _getSupplyStarsForChestQuality(
     chestQuality: SupplyChestQuality,
     chestSerial: number,
     desiredCount: number,
     supplyTier: number
   ): SupplyCardStar[] {
-    const maxStarMap: Record<SupplyChestQuality, SupplyCardStar> = {
-      normal: 2,
-      elite: 3,
-      rare: 4,
-      legendary: 5,
-    };
     const guaranteeStarMap: Partial<Record<SupplyChestQuality, SupplyCardStar>> = {
       elite: 3,
       rare: 4,
       legendary: 5,
     };
 
-    const maxStar = maxStarMap[chestQuality];
+    const maxStar = this._getMaxSupplyStarForChestQuality(chestQuality);
     const result: SupplyCardStar[] = [];
     const guaranteedStar = guaranteeStarMap[chestQuality];
     if (guaranteedStar) {
@@ -1819,6 +1843,16 @@ export class GameManager extends Component {
     }
 
     return result;
+  }
+
+  private _getMaxSupplyStarForChestQuality(chestQuality: SupplyChestQuality): SupplyCardStar {
+    const maxStarMap: Record<SupplyChestQuality, SupplyCardStar> = {
+      normal: 2,
+      elite: 3,
+      rare: 4,
+      legendary: 5,
+    };
+    return maxStarMap[chestQuality];
   }
 
   private _rollSupplyStar(maxStar: SupplyCardStar, chestSerial: number, supplyTier: number): SupplyCardStar {
@@ -1900,6 +1934,20 @@ export class GameManager extends Component {
 
   private _getSupplyCardTypeLabel(cardType: SupplyCardType): string {
     return cardType === 'control' ? '控制' : '火力';
+  }
+
+  private _getSupplyStarText(star: number): string {
+    const safeStar = Math.max(0, Math.min(5, Math.round(star)));
+    return '★'.repeat(safeStar);
+  }
+
+  private _getSupplyStarColor(option: SupplyOptionData): Color {
+    if (option.star >= 5) {
+      return new Color(255, 226, 148, 255);
+    }
+    return option.cardType === 'control'
+      ? new Color(143, 226, 255, 255)
+      : new Color(255, 204, 116, 255);
   }
 
   private _getRunMultiShotCap(): number {
@@ -2197,28 +2245,6 @@ export class GameManager extends Component {
     this._getActiveSupplyChests().forEach(chest => chest.setBattleFrozen(false));
   }
 
-  private _getSupplyIconPath(optionId: string): string {
-    const map: Record<string, string> = {
-      damage_boost: 'db://assets/resources/ui/common/icons_supply_v2/icon_supply_damage.png',
-      fire_rate_boost: 'db://assets/resources/ui/common/icons_supply_v2/icon_supply_fire_rate.png',
-      fire_rate_boost_big: 'db://assets/resources/ui/common/icons_supply_v2/icon_supply_fire_rate_big.png',
-      projectile_speed_up: 'db://assets/resources/ui/common/icons_supply_v2/icon_supply_projectile_speed.png',
-      multishot_up: 'db://assets/resources/ui/common/icons_supply_v2/icon_supply_multishot.png',
-      spread_count_up: 'db://assets/resources/ui/common/icons_supply_v2/icon_supply_spread_count.png',
-      freeze_field: 'db://assets/resources/ui/common/icons_supply_v2/icon_supply_freeze.png',
-      shockwave_blast: 'db://assets/resources/ui/common/icons_supply_v2/icon_supply_shockwave.png',
-      explode_radius_up: 'db://assets/resources/ui/common/icons_supply_v2/icon_supply_explode_radius.png',
-      pierce_up: 'db://assets/resources/ui/common/icons_supply_v2/icon_supply_pierce_up.png',
-      chain_up: 'db://assets/resources/ui/common/icons_supply_v2/icon_supply_chain_up.png',
-      chain_range_up: 'db://assets/resources/ui/common/icons_supply_v2/icon_supply_chain_range.png',
-      airstrike_beacon: 'db://assets/resources/ui/common/icons_supply_v2/icon_supply_airstrike.png',
-      weapon_evo_explode: 'db://assets/resources/ui/common/icons_supply_v2/icon_weapon_evo_explode.png',
-      weapon_evo_pierce: 'db://assets/resources/ui/common/icons_supply_v2/icon_weapon_evo_pierce.png',
-      weapon_evo_arc: 'db://assets/resources/ui/common/icons_supply_v2/icon_weapon_evo_arc.png',
-    };
-    return map[optionId] || 'db://assets/resources/ui/common/icon-weapon-v1.png';
-  }
-
   private _populateSupplyPanel(
     title: string,
     hint: string,
@@ -2248,31 +2274,16 @@ export class GameManager extends Component {
       card.active = !!option;
       if (!option) return;
 
+      const cardSprite = card.getComponent(Sprite);
       const titleLabel = card.getChildByName('TitleLabel')?.getComponent(Label);
       const tagLabel = card.getChildByName('TagLabel')?.getComponent(Label);
       const descLabel = card.getChildByName('DescLabel')?.getComponent(Label);
-      const iconSprite = card.getChildByName('Icon')?.getComponent(Sprite);
+      const starLabel = card.getChildByName('StarLabel')?.getComponent(Label) || null;
       const button = card.getComponent(Button);
 
       if (titleLabel) titleLabel.string = option.title;
       if (tagLabel) tagLabel.string = this._getSupplyTagText(option);
       if (descLabel) descLabel.string = option.desc;
-
-      const resourcePath = this._getSupplyIconPath(option.id).replace(/^db:\/\/assets\/resources\//, '').replace(/\.png$/i, '');
-      if (iconSprite) {
-        iconSprite.spriteFrame = null;
-        resources.load(resourcePath, SpriteFrame, (err, sf) => {
-          if (!err && sf && iconSprite.isValid) {
-            iconSprite.spriteFrame = sf;
-            return;
-          }
-          resources.load('ui/common/icon-weapon-v1', SpriteFrame, (fallbackErr, fallbackSf) => {
-            if (!fallbackErr && fallbackSf && iconSprite.isValid) {
-              iconSprite.spriteFrame = fallbackSf;
-            }
-          });
-        });
-      }
 
       const titleColor = option.cardType === 'control'
         ? option.star >= 5 ? new Color(255, 224, 160, 255) : new Color(158, 229, 255, 255)
@@ -2280,6 +2291,19 @@ export class GameManager extends Component {
       const descColor = option.cardType === 'control'
         ? new Color(208, 240, 255, 255)
         : new Color(240, 230, 214, 255);
+      const starColor = this._getSupplyStarColor(option);
+
+      if (cardSprite) {
+        cardSprite.color = option.cardType === 'control'
+          ? option.star >= 5 ? new Color(236, 244, 255, 255) : new Color(222, 240, 250, 255)
+          : option.star >= 5 ? new Color(255, 244, 222, 255) : new Color(252, 236, 214, 255);
+      }
+
+      if (starLabel) {
+        starLabel.string = this._getSupplyStarText(option.star);
+        starLabel.color = starColor;
+      }
+
       if (titleLabel) {
         titleLabel.color = titleColor;
       }
@@ -2300,9 +2324,25 @@ export class GameManager extends Component {
     });
 
     if (this._supplyPanelAdButton) {
-      this._supplyPanelAdButton.active = true;
       this._supplyPanelAdButton.targetOff(Node.EventType.TOUCH_END);
       this._supplyPanelAdButton.on(Node.EventType.TOUCH_END, () => { void onAdClick(); }, this);
+    }
+    this._refreshSupplyAdArea();
+  }
+
+  private _refreshSupplyAdArea(): void {
+    const remaining = this._getSupplyAdRefreshRemaining();
+    if (this._supplyPanelAdHintLabel) {
+      this._supplyPanelAdHintLabel.string = '更高概率出高级补给卡';
+    }
+    if (this._supplyPanelAdCountLabel) {
+      this._supplyPanelAdCountLabel.string = `本局剩余${remaining}次`;
+    }
+    if (this._supplyPanelAdButtonLabel) {
+      this._supplyPanelAdButtonLabel.string = '观看广告刷新补给卡';
+    }
+    if (this._supplyPanelAdButton) {
+      this._supplyPanelAdButton.active = remaining > 0;
     }
   }
 
@@ -2325,6 +2365,9 @@ export class GameManager extends Component {
       this._supplyPanelSubTitleLabel = null;
       this._supplyPanelStatusLabel = null;
       this._supplyPanelAdButton = null;
+      this._supplyPanelAdButtonLabel = null;
+      this._supplyPanelAdHintLabel = null;
+      this._supplyPanelAdCountLabel = null;
       return;
     }
 
@@ -2335,6 +2378,9 @@ export class GameManager extends Component {
     this._supplyPanelSubTitleLabel = panelRoot?.getChildByName('SubTitleLabel')?.getComponent(Label) || null;
     this._supplyPanelStatusLabel = panelRoot?.getChildByName('StatusLabel')?.getComponent(Label) || null;
     this._supplyPanelAdButton = panelRoot?.getChildByName('AdButton') || null;
+    this._supplyPanelAdButtonLabel = this._supplyPanelAdButton?.getChildByName('Label')?.getComponent(Label) || null;
+    this._supplyPanelAdHintLabel = this._supplyPanelAdButton?.getChildByName('AdHintLabel')?.getComponent(Label) || null;
+    this._supplyPanelAdCountLabel = this._supplyPanelAdButton?.getChildByName('AdCountLabel')?.getComponent(Label) || null;
   }
 
   private _cacheRevivePanelRefs(overlayNode?: Node | null): void {
@@ -2698,7 +2744,6 @@ export class GameManager extends Component {
   private _getSupplyTags(option: SupplyOptionData): string[] {
     return [
       this._getSupplyCardTypeLabel(option.cardType),
-      `${option.star}星`,
       option.triggerMode === 'instant' ? '即时' : '持续',
     ];
   }
