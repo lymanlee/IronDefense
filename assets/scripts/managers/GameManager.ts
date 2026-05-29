@@ -24,7 +24,7 @@ import { GarageScreen } from '../ui/GarageScreen';
 
 const { ccclass, property } = _decorator;
 
-type GameState = 'start' | 'debug' | 'playing' | 'gameover' | 'victory' | 'revive' | 'supply' | 'ad';
+type GameState = 'start' | 'debug' | 'playing' | 'paused' | 'gameover' | 'victory' | 'revive' | 'supply' | 'ad';
 
 interface ChestSlotData {
   x: number;
@@ -118,6 +118,10 @@ export class GameManager extends Component {
 
   // UI 引用
   private _hud: HUDController | null = null;
+  private _pauseButtonNode: Node | null = null;
+  private _pauseButtonLabel: Label | null = null;
+  private _pauseIconNode: Node | null = null;
+  private _playIconNode: Node | null = null;
   private _startScreenNode: Node | null = null;
   private _gameOverScreen: GameOverScreen | null = null;
   private _debugScreen: DebugScreen | null = null;
@@ -135,8 +139,6 @@ export class GameManager extends Component {
   private _supplyPanelSubTitleLabel: Label | null = null;
   private _supplyPanelStatusLabel: Label | null = null;
   private _supplyPanelAdButton: Node | null = null;
-  private _supplyPanelAdButtonLabel: Label | null = null;
-  private _supplyPanelAdHintLabel: Label | null = null;
   private _supplyPanelAdCountLabel: Label | null = null;
   private _waveBannerNode: Node | null = null;
   private _waveSupportTimers: Map<string, number> = new Map();
@@ -292,7 +294,7 @@ export class GameManager extends Component {
             this._syncCurrentStageSelectionFromProgress();
             if (this._startScreenNode) this._startScreenNode.active = true;
             this._refreshStartStageInfo();
-            this._adsManager.showBanner('start');
+            this._refreshPauseButtonState();
           });
         }
         gameOverNode.active = false;
@@ -304,6 +306,8 @@ export class GameManager extends Component {
       const hudNode = canvas?.getChildByName('HUD') || null;
       if (hudNode) {
         this._hud = hudNode.getComponent(HUDController);
+        this._cachePauseButtonRefs(hudNode);
+        this._refreshPauseButtonState();
         hudNode.active = false;
       }
     }
@@ -334,7 +338,6 @@ export class GameManager extends Component {
 
     // 绑定输入
     this._bindInput();
-    this._adsManager.showBanner('start');
   }
 
   /**
@@ -406,6 +409,7 @@ export class GameManager extends Component {
       case 'revive':
       case 'supply':
       case 'ad':
+      case 'paused':
         // 非游戏状态不更新逻辑
         break;
       case 'playing':
@@ -446,7 +450,7 @@ export class GameManager extends Component {
     if (!this._battleFrozen) {
       this._supplyChests.forEach(activeChest => activeChest.updateChest(dt));
       this._updateChestSpawn(dt, enemies);
-      enemies.forEach(e => e.update(dt));
+      enemies.forEach(e => e.tick(dt));
       this._applyPendingWaveOpeningEffects(enemies);
       this._updateSpecialEnemies(enemies, dt);
     }
@@ -497,7 +501,7 @@ export class GameManager extends Component {
     }
 
     // 更新武装车
-    this._playerCar.update(dt);
+    this._playerCar.tick(dt);
 
     // 新波次开始时重置射击计时器
     if (this._waveManager.consumeWaveStart()) {
@@ -1302,6 +1306,7 @@ export class GameManager extends Component {
 
     if (!this._reviveUsed && GameConfig.ads.rewarded.revive.enabled) {
       this._state = 'revive';
+      this._refreshPauseButtonState();
       this._showReviveOffer();
       return;
     }
@@ -1345,10 +1350,11 @@ export class GameManager extends Component {
         this._baseRunReward.parts
       );
       if (this._doubleRewardClaimed) {
-        this._gameOverScreen.setDoubleRewardAvailable(false, '双倍奖励已领取');
+        this._gameOverScreen.setDoubleRewardAvailable(false);
       }
     }
     if (this._hud) this._hud.node.active = false;
+    this._refreshPauseButtonState();
   }
 
   private _showReviveOffer(): void {
@@ -1391,6 +1397,7 @@ export class GameManager extends Component {
     if (this._damageFlashNode) this._damageFlashNode.active = true;
     if (this._hud) this._hud.node.active = true;
     this._state = 'playing';
+    this._refreshPauseButtonState();
   }
 
   private _closeRevivePanel(): void {
@@ -1437,28 +1444,47 @@ export class GameManager extends Component {
         this._baseRunReward.parts
       );
       if (this._doubleRewardClaimed) {
-        this._gameOverScreen.setDoubleRewardAvailable(false, '双倍奖励已领取');
+        this._gameOverScreen.setDoubleRewardAvailable(false);
       }
     }
     if (this._hud) this._hud.node.active = false;
+    this._refreshPauseButtonState();
   }
 
   private _calculateRunReward(): RunReward {
-    const wave = this._waveManager?.currentWaveNum || 1;
     const cfg = GameConfig.gameplay.settlement;
     const bonus = this._progressManager.getPermanentBonuses();
-    const stageDefs = (GameConfig.stages || []) as Array<{ rewardBonus: { coins: number; parts: number } }>;
+    const stageDefs = (GameConfig.stages || []) as Array<{
+      rewardBonus: { coins: number; parts: number };
+      startWave?: number;
+      waveCount: number;
+    }>;
     const stage = stageDefs[this._completedStageIndex] || this._stageManager.currentStage;
+    const completedWaves = this._getCompletedStageWaveCount(stage);
+    const isVictoryReward = this._state === 'victory';
     const bossBonusCoins = this._waveManager?.waveIndex
       ? this._countClearedBossBonuses(this._waveManager.waveIndex)
       : 0;
     const bossBonusParts = this._waveManager?.waveIndex
       ? this._countClearedBossParts(this._waveManager.waveIndex)
       : 0;
+    const stageBonusCoins = isVictoryReward ? stage.rewardBonus.coins : 0;
+    const stageBonusParts = isVictoryReward ? stage.rewardBonus.parts : 0;
     return {
-      coins: Math.floor((this._kills * cfg.coinsPerKill + wave * cfg.coinsPerWave + bossBonusCoins + bonus.startingCoins + stage.rewardBonus.coins) * this._bonusCoinMultiplier),
-      parts: Math.floor(wave / 3) * cfg.partsPerThreeWaves + bossBonusParts + this._bonusFlatParts + bonus.partsFlatBonus + stage.rewardBonus.parts,
+      coins: Math.floor((this._kills * cfg.coinsPerKill + completedWaves * cfg.coinsPerWave + bossBonusCoins + bonus.startingCoins + stageBonusCoins) * this._bonusCoinMultiplier),
+      parts: Math.floor(completedWaves / 3) * cfg.partsPerThreeWaves + bossBonusParts + this._bonusFlatParts + bonus.partsFlatBonus + stageBonusParts,
     };
+  }
+
+  private _getCompletedStageWaveCount(stage: { startWave?: number; waveCount: number }): number {
+    if (this._state === 'victory') {
+      return Math.max(0, stage.waveCount || 0);
+    }
+
+    const startWave = Math.max(1, stage.startWave || 1);
+    const currentWaveNum = this._waveManager?.currentWaveNum || startWave;
+    const completed = Math.max(0, currentWaveNum - startWave);
+    return Math.min(Math.max(0, stage.waveCount || 0), completed);
   }
 
   private async _handleDoubleRewardAd(): Promise<void> {
@@ -1472,7 +1498,8 @@ export class GameManager extends Component {
     if (!completed) return;
     this._progressManager.addReward(this._baseRunReward);
     this._doubleRewardClaimed = true;
-    this._gameOverScreen?.setDoubleRewardAvailable(false, '双倍奖励已领取');
+    this._gameOverScreen?.showDoubleRewardClaimed(this._baseRunReward.coins * 2, this._baseRunReward.parts * 2);
+    this._gameOverScreen?.setDoubleRewardAvailable(false);
   }
 
   private _maybeShowSupplyOffer(): boolean {
@@ -1501,8 +1528,8 @@ export class GameManager extends Component {
     let currentChoices = this._pickSupplyOptions();
     if (currentChoices.length === 0) return false;
     this._freezeBattle();
-    this._adsManager.showBanner('supply');
     this._state = 'supply';
+    this._refreshPauseButtonState();
     let refreshQuality: SupplyChestQuality = 'normal';
     let refreshSerial = 0;
     const renderPanel = (statusText: string): void => {
@@ -1519,8 +1546,10 @@ export class GameManager extends Component {
             return;
           }
           this._state = 'ad';
+          this._refreshPauseButtonState();
           const completed = await this._adsManager.showRewarded('supply');
           this._state = 'supply';
+          this._refreshPauseButtonState();
           if (!completed) {
             this._refreshSupplyAdArea();
             return;
@@ -1560,7 +1589,7 @@ export class GameManager extends Component {
       return false;
     }
     this._freezeBattle();
-    this._adsManager.showBanner('supply');
+    this._refreshPauseButtonState();
     const renderPanel = (statusText: string): void => {
       this._populateSupplyPanel(
         `${this._getChestQualityName(currentQuality)}补给开启`,
@@ -1575,8 +1604,10 @@ export class GameManager extends Component {
             return;
           }
           this._state = 'ad';
+          this._refreshPauseButtonState();
           const completed = await this._adsManager.showRewarded('supply');
           this._state = 'supply';
+          this._refreshPauseButtonState();
           if (!completed) {
             this._refreshSupplyAdArea();
             return;
@@ -1602,6 +1633,7 @@ export class GameManager extends Component {
     };
     renderPanel('选择一张补给卡');
     this._state = 'supply';
+    this._refreshPauseButtonState();
     return true;
   }
 
@@ -1618,7 +1650,7 @@ export class GameManager extends Component {
       return false;
     }
     this._freezeBattle();
-    this._adsManager.showBanner('supply');
+    this._refreshPauseButtonState();
     this._populateSupplyPanel(
       `${this._getChestQualityName(chest.quality)}补给升级`,
       '广告奖励：已刷新为更高级补给，三选一',
@@ -1635,6 +1667,7 @@ export class GameManager extends Component {
       }
     );
     this._state = 'supply';
+    this._refreshPauseButtonState();
     return true;
   }
 
@@ -2007,6 +2040,7 @@ export class GameManager extends Component {
     if (resumeGame) {
       this._state = 'playing';
     }
+    this._refreshPauseButtonState();
   }
 
   private _getSupplyMode(): SupplyMode {
@@ -2332,14 +2366,8 @@ export class GameManager extends Component {
 
   private _refreshSupplyAdArea(): void {
     const remaining = this._getSupplyAdRefreshRemaining();
-    if (this._supplyPanelAdHintLabel) {
-      this._supplyPanelAdHintLabel.string = '更高概率出高级补给卡';
-    }
     if (this._supplyPanelAdCountLabel) {
       this._supplyPanelAdCountLabel.string = `本局剩余${remaining}次`;
-    }
-    if (this._supplyPanelAdButtonLabel) {
-      this._supplyPanelAdButtonLabel.string = '观看广告刷新补给卡';
     }
     if (this._supplyPanelAdButton) {
       this._supplyPanelAdButton.active = remaining > 0;
@@ -2365,8 +2393,6 @@ export class GameManager extends Component {
       this._supplyPanelSubTitleLabel = null;
       this._supplyPanelStatusLabel = null;
       this._supplyPanelAdButton = null;
-      this._supplyPanelAdButtonLabel = null;
-      this._supplyPanelAdHintLabel = null;
       this._supplyPanelAdCountLabel = null;
       return;
     }
@@ -2378,8 +2404,6 @@ export class GameManager extends Component {
     this._supplyPanelSubTitleLabel = panelRoot?.getChildByName('SubTitleLabel')?.getComponent(Label) || null;
     this._supplyPanelStatusLabel = panelRoot?.getChildByName('StatusLabel')?.getComponent(Label) || null;
     this._supplyPanelAdButton = panelRoot?.getChildByName('AdButton') || null;
-    this._supplyPanelAdButtonLabel = this._supplyPanelAdButton?.getChildByName('Label')?.getComponent(Label) || null;
-    this._supplyPanelAdHintLabel = this._supplyPanelAdButton?.getChildByName('AdHintLabel')?.getComponent(Label) || null;
     this._supplyPanelAdCountLabel = this._supplyPanelAdButton?.getChildByName('AdCountLabel')?.getComponent(Label) || null;
   }
 
@@ -2587,6 +2611,7 @@ export class GameManager extends Component {
     if (this._garageScreenNode) this._garageScreenNode.active = false;
     if (this._gameOverScreen) this._gameOverScreen.node.active = false;
     if (this._hud) this._hud.node.active = true;
+    this._refreshPauseButtonState();
   }
 
   restart(): void {
@@ -2598,12 +2623,14 @@ export class GameManager extends Component {
     if (this._startScreenNode) this._startScreenNode.active = false;
     if (this._garageScreenNode) this._garageScreenNode.active = false;
     if (this._debugScreenNode) this._debugScreenNode.active = true;
+    this._refreshPauseButtonState();
   }
 
   private _hideDebugScreen(): void {
     if (this._debugScreenNode) this._debugScreenNode.active = false;
     if (this._startScreenNode) this._startScreenNode.active = true;
     this._refreshStartStageInfo();
+    this._refreshPauseButtonState();
   }
 
   private _showGarageScreen(): void {
@@ -2612,12 +2639,14 @@ export class GameManager extends Component {
     if (this._debugScreenNode) this._debugScreenNode.active = false;
     this._garageScreenNode.active = true;
     this._garageScreen.refresh();
+    this._refreshPauseButtonState();
   }
 
   private _hideGarageScreen(): void {
     if (this._garageScreenNode) this._garageScreenNode.active = false;
     if (this._startScreenNode) this._startScreenNode.active = true;
     this._refreshStartStageInfo();
+    this._refreshPauseButtonState();
   }
 
   private _upgradePermanentNode(id: PermanentUpgradeId): boolean {
@@ -2633,6 +2662,57 @@ export class GameManager extends Component {
     this._syncCurrentStageSelectionFromProgress();
     this._garageScreen?.refresh();
     this._refreshStartStageInfo();
+  }
+
+  private _cachePauseButtonRefs(hudNode?: Node | null): void {
+    const root = hudNode || this._hud?.node || director.getScene()?.getChildByName('Canvas')?.getChildByName('HUD') || null;
+    this._pauseButtonNode = this._pauseButtonNode || root?.getChildByName('PauseButton') || null;
+    this._pauseButtonLabel = this._pauseButtonLabel
+      || this._pauseButtonNode?.getChildByName('Label')?.getComponent(Label)
+      || null;
+    this._pauseIconNode = this._pauseIconNode || this._pauseButtonNode?.getChildByName('PauseIcon') || null;
+    this._playIconNode = this._playIconNode || this._pauseButtonNode?.getChildByName('PlayIcon') || null;
+  }
+
+  private _refreshPauseButtonState(): void {
+    this._cachePauseButtonRefs();
+    const visible = this._state === 'playing' || this._state === 'paused';
+    if (this._pauseButtonNode) {
+      this._pauseButtonNode.active = visible;
+    }
+    if (this._pauseIconNode) {
+      this._pauseIconNode.active = this._state === 'playing';
+    }
+    if (this._playIconNode) {
+      this._playIconNode.active = this._state === 'paused';
+    }
+    if (this._pauseButtonLabel) {
+      this._pauseButtonLabel.string = this._state === 'paused' ? '继续' : '暂停';
+    }
+  }
+
+  private _setPaused(paused: boolean): void {
+    if (paused) {
+      if (this._state !== 'playing') return;
+      this._state = 'paused';
+      this._accumulator = 0;
+      this._playerCar?.setKeyLeft(false);
+      this._playerCar?.setKeyRight(false);
+      this._playerCar?.onTouchEnd();
+    } else {
+      if (this._state !== 'paused') return;
+      this._state = 'playing';
+      this._accumulator = 0;
+    }
+    this._refreshPauseButtonState();
+  }
+
+  onPauseToggleClicked(): void {
+    if (this._state === 'playing') {
+      this._setPaused(true);
+    } else if (this._state === 'paused') {
+      this._setPaused(false);
+    }
   }
 
   private _getCurrentWeaponEvolution(): WeaponEvolutionData | null {
@@ -2940,6 +3020,12 @@ export class GameManager extends Component {
       canPrev,
       canNext,
     });
+    startScreen.setGarageNotifyVisible(this._hasAnyGarageUpgradeAvailable());
+  }
+
+  private _hasAnyGarageUpgradeAvailable(): boolean {
+    const upgrades = GameConfig.progression.upgrades as Array<{ id: PermanentUpgradeId }>;
+    return upgrades.some(upgrade => this._progressManager.canUpgrade(upgrade.id));
   }
 
   private _changeStageSelection(offset: number): void {
@@ -3004,7 +3090,12 @@ export class GameManager extends Component {
   }
 
   private _onKeyDown(event: any): void {
+    if (event.keyCode === KeyCode.ESCAPE) {
+      this.onPauseToggleClicked();
+      return;
+    }
     if (!this._playerCar) return;
+    if (this._state !== 'playing') return;
     if (event.keyCode === KeyCode.ARROW_LEFT || event.keyCode === KeyCode.KEY_A) {
       this._playerCar.setKeyLeft(true);
     }
@@ -3014,6 +3105,7 @@ export class GameManager extends Component {
   }
 
   private _onKeyUp(event: any): void {
+    if (this._state !== 'playing' && this._state !== 'paused') return;
     if (!this._playerCar) return;
     if (event.keyCode === KeyCode.ARROW_LEFT || event.keyCode === KeyCode.KEY_A) {
       this._playerCar.setKeyLeft(false);
@@ -3024,12 +3116,14 @@ export class GameManager extends Component {
   }
 
   private _onTouchStart(event: any): void {
+    if (this._state !== 'playing') return;
     if (!this._playerCar) return;
     const worldX = this._screenToWorldX(event.getLocation().x);
     this._playerCar.onTouchStart(worldX);
   }
 
   private _onTouchMove(event: any): void {
+    if (this._state !== 'playing') return;
     if (!this._playerCar) return;
     const worldX = this._screenToWorldX(event.getLocation().x);
     this._playerCar.onTouchMove(worldX);

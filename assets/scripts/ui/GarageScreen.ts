@@ -3,11 +3,17 @@
  * 展示长期资源、永久升级项，并提供升级与返回入口
  */
 
-import { _decorator, Button, Color, Component, Label, Node } from 'cc';
+import { _decorator, Button, Color, Component, Label, Node, Sprite } from 'cc';
 import { PermanentUpgradeConfig, PermanentUpgradeId } from '../data/GameConfig';
 import { ProgressManager } from '../managers/ProgressManager';
 
 const { ccclass, property } = _decorator;
+
+const UPGRADE_BUTTON_ENABLED_COLOR = new Color(245, 245, 245, 255);
+const UPGRADE_BUTTON_DISABLED_COLOR = new Color(92, 104, 115, 190);
+const UPGRADE_BUTTON_LABEL_ENABLED_COLOR = new Color(255, 255, 255, 255);
+const UPGRADE_BUTTON_LABEL_DISABLED_COLOR = new Color(165, 176, 186, 255);
+const UPGRADE_COST_DISABLED_COLOR = new Color(133, 150, 166, 255);
 
 type UpgradeRowRefs = {
   id: PermanentUpgradeId;
@@ -83,23 +89,20 @@ export class GarageScreen extends Component {
       if (row.valueLabel) {
         row.valueLabel.string = this._formatUpgradeValue(state);
       }
+      const enabled = !state.isMaxLevel && progress.canUpgrade(state.id);
       if (row.costLabel) {
         row.costLabel.string = state.isMaxLevel
           ? '已满级'
           : `${state.currency === 'coins' ? '金币' : '零件'} ${state.nextCost}`;
-        row.costLabel.color = state.isMaxLevel
-          ? new Color(133, 150, 166, 255)
+        row.costLabel.color = !enabled
+          ? UPGRADE_COST_DISABLED_COLOR
           : this._getCurrencyColor(state.currency);
       }
 
-      const enabled = !state.isMaxLevel && progress.canUpgrade(state.id);
-      if (row.buttonNode) {
-        const button = row.buttonNode.getComponent(Button);
-        if (button) button.interactable = enabled;
-      }
       if (row.buttonLabel) {
         row.buttonLabel.string = state.isMaxLevel ? '满级' : enabled ? '升级' : '不足';
       }
+      this._applyUpgradeButtonState(row, enabled);
     });
   }
 
@@ -149,6 +152,28 @@ export class GarageScreen extends Component {
       buttonNode: root?.getChildByName('UpgradeBtn') || null,
       buttonLabel: root?.getChildByName('UpgradeBtn')?.getChildByName('Label')?.getComponent(Label) || null,
     };
+  }
+
+  private _applyUpgradeButtonState(row: UpgradeRowRefs, enabled: boolean): void {
+    if (row.buttonNode) {
+      const button = row.buttonNode.getComponent(Button);
+      if (button) {
+        button.normalColor = UPGRADE_BUTTON_ENABLED_COLOR;
+        button.disabledColor = UPGRADE_BUTTON_DISABLED_COLOR;
+        button.interactable = enabled;
+      }
+
+      const sprite = row.buttonNode.getComponent(Sprite);
+      if (sprite) {
+        sprite.color = enabled ? UPGRADE_BUTTON_ENABLED_COLOR : UPGRADE_BUTTON_DISABLED_COLOR;
+      }
+    }
+
+    if (row.buttonLabel) {
+      row.buttonLabel.color = enabled
+        ? UPGRADE_BUTTON_LABEL_ENABLED_COLOR
+        : UPGRADE_BUTTON_LABEL_DISABLED_COLOR;
+    }
   }
 
   private _formatUpgradeValue(config: PermanentUpgradeConfig & { value: number; extraValue: number }): string {

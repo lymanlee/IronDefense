@@ -20,8 +20,8 @@ export const GameConfig = {
     right: 300,       // 桥右边界 x（原 640 - 360）
     top: 430,         // 桥顶端 y（下移出生区，避免压住 HUD）
     laneCount: 5,     // 桥面列数
-    railY: -520,      // 护栏 y 坐标（屏幕下方）
-    carY: -580,       // 武装车 y 坐标（护栏下方，保护栅栏）
+    railY: -480,      // 护栏 y 坐标（上移，给战车更多活动空间）
+    carY: -540,       // 武装车 y 坐标（与护栏保持间隔，整体上移）
   },
 
   // ============================================
@@ -75,6 +75,7 @@ export const GameConfig = {
   enemy: {
     width: 64,        // 宽度（匹配帧动画素材）
     height: 85,      // 高度（匹配帧动画素材）
+    railContactOffset: 60, // 敌人推进到护栏附近后停下并开始攻击的中心点偏移
     attackRange: 40,  // 进入护栏范围内开始攻击（原版20 * 2）
     attackRate: 1.0,  // 攻击频率 次/s
   },
@@ -487,13 +488,13 @@ export const GameConfig = {
         {
           id: 'fire_rate_boost',
           title: '快装弹链',
-          desc: '本关射速提升20%，可叠加',
+          desc: '本关射速提升12%，可叠加',
           cardType: 'firepower',
           star: 1,
           triggerMode: 'passive',
           assetKey: 'icon_supply_fire_rate',
           assetBrief: '金属弹链、速度线，可做64x64图标',
-          effect: { type: 'fireRateMultiplier', value: 1.2 },
+          effect: { type: 'fireRateMultiplier', value: 1.12 },
         },
         {
           id: 'fire_rate_boost_big',
@@ -531,13 +532,13 @@ export const GameConfig = {
         {
           id: 'stability_burst',
           title: '轻量供弹',
-          desc: '本关射速提升12%，供弹节奏更顺畅，可叠加',
+          desc: '本关射速提升20%，供弹节奏更顺畅，可叠加',
           cardType: 'firepower',
           star: 2,
           triggerMode: 'passive',
           assetKey: 'icon_supply_stability_burst',
           assetBrief: '紧凑弹链、稳定供弹轮与暖色速度线，可做64x64图标',
-          effect: { type: 'fireRateMultiplier', value: 1.12 },
+          effect: { type: 'fireRateMultiplier', value: 1.2 },
         },
         {
           id: 'multishot_up',

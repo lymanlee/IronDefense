@@ -227,7 +227,8 @@ export class PlayerCar extends Component {
   /**
    * 更新武装车
    */
-  update(dt: number): void {
+  // Manual tick driven by GameManager. Avoid Cocos Component.update auto-running in parallel.
+  tick(dt: number): void {
     if (this._dead) return;
 
     if (this._invulnerableTimer > 0) {

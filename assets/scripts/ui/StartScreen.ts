@@ -66,6 +66,9 @@ export class StartScreen extends Component {
   @property(Button)
   nextStageButton: Button | null = null;
 
+  @property(Node)
+  garageNotifyNode: Node | null = null;
+
   /**
    * 设置开始回调
    */
@@ -127,6 +130,13 @@ export class StartScreen extends Component {
     if (this.nextStageButton) this.nextStageButton.interactable = data.canNext;
   }
 
+  setGarageNotifyVisible(visible: boolean): void {
+    this._ensureGarageRefs();
+    if (this.garageNotifyNode) {
+      this.garageNotifyNode.active = visible;
+    }
+  }
+
   private _ensureStageRefs(): void {
     const stageCard = this.node.getChildByName('StageCard');
     if (!this.stageTitleLabel) {
@@ -161,6 +171,15 @@ export class StartScreen extends Component {
     }
     if (!this.nextStageButton) {
       this.nextStageButton = stageCard?.getChildByName('NextStageButton')?.getComponent(Button) || null;
+    }
+  }
+
+  private _ensureGarageRefs(): void {
+    if (!this.garageNotifyNode) {
+      this.garageNotifyNode = this.node
+        .getChildByName('ActionBlock')
+        ?.getChildByName('GarageButton')
+        ?.getChildByName('UpgradeDot') || null;
     }
   }
 

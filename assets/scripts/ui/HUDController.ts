@@ -83,9 +83,9 @@ export class HUDController extends Component {
       this.hpLabel.string = `生命值 ${Math.ceil(hp)}/${Math.ceil(maxHp)}`;
     }
 
-    // 关卡击杀进度
+    // 关卡完成进度
     if (this.lvLabel) {
-      this.lvLabel.string = this._compactKillProgress(killProgressText);
+      this.lvLabel.string = this._formatCompletionProgress(killProgress, killProgressText);
     }
 
     // 血条
@@ -153,6 +153,15 @@ export class HUDController extends Component {
     if (!this.buffSummaryLabel) {
       this.buffSummaryLabel = this.node.getChildByName('BuffSummaryLabel')?.getComponent(Label) || null;
     }
+  }
+
+  private _formatCompletionProgress(progress: number, fallbackText: string): string {
+    if (Number.isFinite(progress)) {
+      const pct = Math.max(0, Math.min(100, Math.floor(progress * 100)));
+      return `完成进度 ${pct}%`;
+    }
+
+    return this._compactKillProgress(fallbackText);
   }
 
   private _compactKillProgress(text: string): string {

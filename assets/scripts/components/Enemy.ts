@@ -221,7 +221,8 @@ export class Enemy extends Component {
 
   // ==================== 每帧更新 ====================
 
-  update(dt: number): void {
+  // Manual tick driven by GameManager. Avoid Cocos Component.update auto-running in parallel.
+  tick(dt: number): void {
     if (this._battleFrozen) return;
     this._spawnTimer += dt;
     if (this._openingArmorTimer > 0) {
@@ -331,8 +332,9 @@ export class Enemy extends Component {
     this._y -= this._speed * this._speedScale * dt;
     this.node.setPosition(this._x, this._y, 0);
 
-    if (this._y <= GameConfig.bridge.railY + 10) {
-      this._y = GameConfig.bridge.railY + 10;
+    const contactY = GameConfig.bridge.railY + GameConfig.enemy.railContactOffset;
+    if (this._y <= contactY) {
+      this._y = contactY;
       this._reachedRail = true;
       this.node.setPosition(this._x, this._y, 0);
     }
@@ -383,7 +385,7 @@ export class Enemy extends Component {
   setWorldPosition(x: number, y: number): void {
     this._x = x;
     this._y = y;
-    this._reachedRail = y <= GameConfig.bridge.railY + 10;
+    this._reachedRail = y <= GameConfig.bridge.railY + GameConfig.enemy.railContactOffset;
     this.node.setPosition(this._x, this._y, 0);
   }
 
