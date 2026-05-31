@@ -3,7 +3,7 @@
  * 显示标题、开始按钮、调试模式入口
  */
 
-import { _decorator, Component, Node, Label, Button } from 'cc';
+import { _decorator, Component, Node, Label, Button, tween, Tween, UIOpacity, Vec3 } from 'cc';
 
 const { ccclass, property } = _decorator;
 
@@ -26,6 +26,9 @@ export interface StartStageDisplayData {
 
 @ccclass('StartScreen')
 export class StartScreen extends Component {
+  private static readonly SHOW_DURATION = 0.4;
+  private static readonly HIDE_DURATION = 0.18;
+
   // 回调
   private _onStart: (() => void) | null = null;
   private _onDebug: (() => void) | null = null;
@@ -68,6 +71,12 @@ export class StartScreen extends Component {
 
   @property(Node)
   garageNotifyNode: Node | null = null;
+
+  private _bgNode: Node | null = null;
+  private _heroBlockNode: Node | null = null;
+  private _stageBlockNode: Node | null = null;
+  private _actionBlockNode: Node | null = null;
+  private _utilityBarNode: Node | null = null;
 
   /**
    * 设置开始回调
@@ -137,6 +146,89 @@ export class StartScreen extends Component {
     }
   }
 
+  show(animated: boolean = true): void {
+    this._ensureLayoutRefs();
+    if (!animated) {
+      this.node.active = true;
+      this._restoreShownState();
+      return;
+    }
+
+    this.node.active = true;
+    this._resetBg();
+    const groups = this._getAnimatedGroups();
+    groups.forEach((group, index) => this._resetGroup(group, index));
+
+    const bgOpacity = this._bgNode ? this._ensureOpacity(this._bgNode) : null;
+    if (bgOpacity) {
+      Tween.stopAllByTarget(bgOpacity);
+      tween(bgOpacity)
+        .to(StartScreen.SHOW_DURATION * 0.65, { opacity: 235 }, { easing: 'quadOut' })
+        .start();
+    }
+
+    groups.forEach((group, index) => {
+      const opacity = this._ensureOpacity(group);
+      const targetPosition = this._getBasePosition(group);
+      const delay = 0.05 + index * 0.05;
+      Tween.stopAllByTarget(opacity);
+      Tween.stopAllByTarget(group);
+      tween(opacity)
+        .delay(delay)
+        .to(0.22, { opacity: 255 }, { easing: 'quadOut' })
+        .start();
+      tween(group)
+        .delay(delay)
+        .to(0.24, {
+          position: targetPosition,
+          scale: new Vec3(1.04, 1.04, 1),
+        }, { easing: 'backOut' })
+        .to(0.16, {
+          scale: new Vec3(1, 1, 1),
+        }, { easing: 'quadOut' })
+        .start();
+    });
+  }
+
+  hide(animated: boolean = false, onDone?: () => void): void {
+    this._ensureLayoutRefs();
+    if (!animated) {
+      this.node.active = false;
+      onDone?.();
+      return;
+    }
+
+    const groups = this._getAnimatedGroups();
+    const bgOpacity = this._bgNode ? this._ensureOpacity(this._bgNode) : null;
+    if (bgOpacity) {
+      Tween.stopAllByTarget(bgOpacity);
+      tween(bgOpacity)
+        .to(StartScreen.HIDE_DURATION, { opacity: 0 }, { easing: 'quadIn' })
+        .start();
+    }
+
+    groups.forEach((group) => {
+      const opacity = this._ensureOpacity(group);
+      Tween.stopAllByTarget(opacity);
+      Tween.stopAllByTarget(group);
+      tween(opacity)
+        .to(StartScreen.HIDE_DURATION * 0.85, { opacity: 0 }, { easing: 'quadIn' })
+        .start();
+      tween(group)
+        .to(StartScreen.HIDE_DURATION, {
+          position: this._getBasePosition(group).clone().add3f(0, -18, 0),
+          scale: new Vec3(0.96, 0.96, 1),
+        }, { easing: 'quadIn' })
+        .start();
+    });
+
+    this.scheduleOnce(() => {
+      this.node.active = false;
+      this._restoreShownState();
+      onDone?.();
+    }, StartScreen.HIDE_DURATION);
+  }
+
   private _ensureStageRefs(): void {
     const stageCard = this.node.getChildByName('StageCard');
     if (!this.stageTitleLabel) {
@@ -181,6 +273,63 @@ export class StartScreen extends Component {
         ?.getChildByName('GarageButton')
         ?.getChildByName('UpgradeDot') || null;
     }
+  }
+
+  private _ensureLayoutRefs(): void {
+    this._bgNode = this._bgNode || this.node.getChildByName('Bg') || null;
+    this._heroBlockNode = this._heroBlockNode || this.node.getChildByName('HeroBlock') || null;
+    this._stageBlockNode = this._stageBlockNode || this.node.getChildByName('StageBlock') || null;
+    this._actionBlockNode = this._actionBlockNode || this.node.getChildByName('ActionBlock') || null;
+    this._utilityBarNode = this._utilityBarNode || this.node.getChildByName('UtilityBar') || null;
+  }
+
+  private _getAnimatedGroups(): Node[] {
+    return [
+      this._heroBlockNode,
+      this._stageBlockNode,
+      this._actionBlockNode,
+      this._utilityBarNode,
+    ].filter((node): node is Node => Boolean(node && node.isValid));
+  }
+
+  private _resetBg(): void {
+    if (!this._bgNode) return;
+    const opacity = this._ensureOpacity(this._bgNode);
+    Tween.stopAllByTarget(opacity);
+    opacity.opacity = 0;
+  }
+
+  private _resetGroup(node: Node, index: number): void {
+    const opacity = this._ensureOpacity(node);
+    const basePosition = this._getBasePosition(node);
+    Tween.stopAllByTarget(node);
+    Tween.stopAllByTarget(opacity);
+    node.setPosition(basePosition.clone().add3f(0, 26 + index * 10, 0));
+    node.setScale(0.94, 0.94, 1);
+    opacity.opacity = 0;
+  }
+
+  private _restoreShownState(): void {
+    if (this._bgNode?.isValid) {
+      this._ensureOpacity(this._bgNode).opacity = 235;
+    }
+    this._getAnimatedGroups().forEach((group) => {
+      group.setPosition(this._getBasePosition(group));
+      group.setScale(1, 1, 1);
+      this._ensureOpacity(group).opacity = 255;
+    });
+  }
+
+  private _getBasePosition(node: Node): Vec3 {
+    const carrier = node as Node & { __popupBasePosition?: Vec3 };
+    if (!carrier.__popupBasePosition) {
+      carrier.__popupBasePosition = node.getPosition().clone();
+    }
+    return carrier.__popupBasePosition.clone();
+  }
+
+  private _ensureOpacity(node: Node): UIOpacity {
+    return node.getComponent(UIOpacity) || node.addComponent(UIOpacity);
   }
 
   /**

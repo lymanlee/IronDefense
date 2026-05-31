@@ -9,6 +9,9 @@ const { ccclass, property } = _decorator;
 
 @ccclass('GameOverScreen')
 export class GameOverScreen extends Component {
+  private static readonly POPUP_SHOW_DURATION = 0.38;
+  private static readonly POPUP_HIDE_DURATION = 0.2;
+
   private _onRestart: (() => void) | null = null;
   private _onMenu: (() => void) | null = null;
   private _onDoubleReward: (() => void) | null = null;
@@ -16,6 +19,9 @@ export class GameOverScreen extends Component {
   private _rewardPrefix: string = '结算奖励';
   private _displayedRewardCoins: number = 0;
   private _displayedRewardParts: number = 0;
+  private _bgNode: Node | null = null;
+  private _contentShadeNode: Node | null = null;
+  private _panelNode: Node | null = null;
 
   @property(Label)
   titleLabel: Label | null = null;
@@ -98,7 +104,7 @@ export class GameOverScreen extends Component {
       this.bannerAdSlot.active = false;
     }
     this.setDoubleRewardAvailable(true);
-    this.node.active = true;
+    this._playShowAnimation();
   }
 
   showVictory(
@@ -130,7 +136,7 @@ export class GameOverScreen extends Component {
       this.bannerAdSlot.active = false;
     }
     this.setDoubleRewardAvailable(true);
-    this.node.active = true;
+    this._playShowAnimation();
   }
 
   onRestartClicked(): void {
@@ -172,7 +178,7 @@ export class GameOverScreen extends Component {
   }
 
   hide(): void {
-    this.node.active = false;
+    this._playHideAnimation();
   }
 
   private _buildStatsText(stageLabel: string, kills: number, wave: number, progressText: string): string {
@@ -362,7 +368,11 @@ export class GameOverScreen extends Component {
 
   private _ensureRefs(): void {
     const bg = this.node.getChildByName('Bg');
+    const contentShade = bg?.getChildByName('ContentShade');
     const panel = bg?.getChildByName('Panel');
+    this._bgNode = bg || null;
+    this._contentShadeNode = contentShade || null;
+    this._panelNode = panel || null;
     const infoCard = panel?.getChildByName('InfoCard');
     const rewardCard = panel?.getChildByName('RewardCard');
 
@@ -396,5 +406,159 @@ export class GameOverScreen extends Component {
     if (!this.bannerAdSlot) {
       this.bannerAdSlot = bg?.getChildByName('BannerAdSlot') || this.node.getChildByName('BannerAdSlot') || null;
     }
+  }
+
+  private _playShowAnimation(): void {
+    this._ensureRefs();
+    if (!this._panelNode) {
+      this.node.active = true;
+      return;
+    }
+
+    this.node.active = true;
+    this._resetShade(this._contentShadeNode);
+    this._resetPanel(this._panelNode);
+    const contentNodes = this._getAnimatedContentNodes();
+    contentNodes.forEach((node, index) => this._resetContent(node, index));
+
+    const shadeOpacity = this._contentShadeNode ? this._ensureOpacity(this._contentShadeNode) : null;
+    if (shadeOpacity) {
+      Tween.stopAllByTarget(shadeOpacity);
+      tween(shadeOpacity)
+        .to(GameOverScreen.POPUP_SHOW_DURATION * 0.62, { opacity: 214 }, { easing: 'quadOut' })
+        .start();
+    }
+
+    const panelOpacity = this._ensureOpacity(this._panelNode);
+    Tween.stopAllByTarget(panelOpacity);
+    tween(panelOpacity)
+      .to(GameOverScreen.POPUP_SHOW_DURATION * 0.72, { opacity: 255 }, { easing: 'quadOut' })
+      .start();
+
+    const panelTarget = this._getBasePosition(this._panelNode);
+    Tween.stopAllByTarget(this._panelNode);
+    tween(this._panelNode)
+      .to(GameOverScreen.POPUP_SHOW_DURATION * 0.54, {
+        scale: new Vec3(1.08, 1.08, 1),
+        position: panelTarget.clone(),
+      }, { easing: 'backOut' })
+      .to(GameOverScreen.POPUP_SHOW_DURATION * 0.24, {
+        scale: new Vec3(0.985, 0.985, 1),
+        position: panelTarget,
+      }, { easing: 'sineOut' })
+      .to(GameOverScreen.POPUP_SHOW_DURATION * 0.22, {
+        scale: new Vec3(1, 1, 1),
+        position: panelTarget,
+      }, { easing: 'quadOut' })
+      .start();
+
+    contentNodes.forEach((node, index) => {
+      const opacity = this._ensureOpacity(node);
+      const targetPosition = this._getBasePosition(node);
+      Tween.stopAllByTarget(opacity);
+      Tween.stopAllByTarget(node);
+      tween(opacity)
+        .delay(0.08 + index * 0.04)
+        .to(0.2, { opacity: 255 }, { easing: 'quadOut' })
+        .start();
+      tween(node)
+        .delay(0.08 + index * 0.04)
+        .to(0.22, { position: targetPosition }, { easing: 'backOut' })
+        .start();
+    });
+  }
+
+  private _playHideAnimation(): void {
+    this._ensureRefs();
+    if (!this._panelNode) {
+      this.node.active = false;
+      return;
+    }
+
+    const shadeOpacity = this._contentShadeNode ? this._ensureOpacity(this._contentShadeNode) : null;
+    if (shadeOpacity) {
+      Tween.stopAllByTarget(shadeOpacity);
+      tween(shadeOpacity)
+        .to(GameOverScreen.POPUP_HIDE_DURATION, { opacity: 0 }, { easing: 'quadIn' })
+        .start();
+    }
+
+    const panelOpacity = this._ensureOpacity(this._panelNode);
+    Tween.stopAllByTarget(panelOpacity);
+    tween(panelOpacity)
+      .to(GameOverScreen.POPUP_HIDE_DURATION, { opacity: 0 }, { easing: 'quadIn' })
+      .start();
+
+    Tween.stopAllByTarget(this._panelNode);
+    tween(this._panelNode)
+      .to(GameOverScreen.POPUP_HIDE_DURATION, {
+        scale: new Vec3(0.94, 0.94, 1),
+        position: this._getBasePosition(this._panelNode).clone().add3f(0, -20, 0),
+      }, { easing: 'quadIn' })
+      .call(() => {
+        if (this._contentShadeNode?.isValid) {
+          this._ensureOpacity(this._contentShadeNode).opacity = 0;
+        }
+        if (this._panelNode?.isValid) {
+          this._panelNode.setScale(1, 1, 1);
+          this._panelNode.setPosition(this._getBasePosition(this._panelNode));
+          this._ensureOpacity(this._panelNode).opacity = 255;
+        }
+        this.node.active = false;
+      })
+      .start();
+  }
+
+  private _getAnimatedContentNodes(): Node[] {
+    return [
+      this.titleLabel?.node,
+      this.subtitleLabel?.node?.active ? this.subtitleLabel.node : null,
+      this.statsLabel?.node?.active ? this.statsLabel.node : null,
+      this.stageLineLabel?.node,
+      this.combatLineLabel?.node,
+      this.progressLineLabel?.node,
+      this.rewardLabel?.node,
+      this.doubleRewardButton?.node?.active ? this.doubleRewardButton.node : null,
+      this._bgNode?.getChildByName('MenuBtn') || null,
+      this.restartButton?.node?.active ? this.restartButton.node : null,
+    ].filter((node): node is Node => Boolean(node && node.isValid));
+  }
+
+  private _resetShade(node: Node | null): void {
+    if (!node?.isValid) return;
+    const opacity = this._ensureOpacity(node);
+    Tween.stopAllByTarget(opacity);
+    opacity.opacity = 0;
+  }
+
+  private _resetPanel(node: Node): void {
+    const opacity = this._ensureOpacity(node);
+    const basePosition = this._getBasePosition(node);
+    Tween.stopAllByTarget(node);
+    Tween.stopAllByTarget(opacity);
+    node.setScale(0.88, 0.88, 1);
+    node.setPosition(basePosition.clone().add3f(0, 52, 0));
+    opacity.opacity = 0;
+  }
+
+  private _resetContent(node: Node, index: number): void {
+    const opacity = this._ensureOpacity(node);
+    const basePosition = this._getBasePosition(node);
+    Tween.stopAllByTarget(node);
+    Tween.stopAllByTarget(opacity);
+    node.setPosition(basePosition.clone().add3f(0, 20 + Math.min(index, 4) * 4, 0));
+    opacity.opacity = 0;
+  }
+
+  private _getBasePosition(node: Node): Vec3 {
+    const carrier = node as Node & { __popupBasePosition?: Vec3 };
+    if (!carrier.__popupBasePosition) {
+      carrier.__popupBasePosition = node.getPosition().clone();
+    }
+    return carrier.__popupBasePosition.clone();
+  }
+
+  private _ensureOpacity(node: Node): UIOpacity {
+    return node.getComponent(UIOpacity) || node.addComponent(UIOpacity);
   }
 }

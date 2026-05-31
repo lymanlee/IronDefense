@@ -16,7 +16,7 @@ import { _decorator, Component, AudioSource, AudioClip, resources, error } from 
 const { ccclass, property } = _decorator;
 
 /** SFX 音效名称 → resources/audio/ 下的文件名 */
-const SFX_NAMES = ['shoot', 'explode', 'hit', 'levelup', 'alarm'];
+const SFX_NAMES = ['shoot', 'explode', 'mass_explode', 'hit', 'levelup', 'alarm'];
 
 @ccclass('AudioManager')
 export class AudioManager extends Component {
@@ -28,6 +28,9 @@ export class AudioManager extends Component {
 
   @property({ type: AudioSource, tooltip: 'SFX 音源，在编辑器中绑定，PlayOnAwake=false' })
   sfxSource: AudioSource = null!;
+
+  @property({ type: AudioSource, tooltip: '群体爆炸 SFX 音源，在编辑器中绑定，PlayOnAwake=false' })
+  heavySfxSource: AudioSource = null!;
 
   // --- 内部状态 ---
 
@@ -79,6 +82,8 @@ export class AudioManager extends Component {
 
   shoot(): void { this._playSFX('shoot'); }
   explode(): void { this._playSFX('explode'); }
+  explodeAt(volume: number): void { this._playSFX('explode', volume); }
+  heavyExplodeAt(volume: number): void { this._playSFX('mass_explode', volume, true); }
   enemyHit(): void { this._playSFX('hit'); }
   levelUp(): void { this._playSFX('levelup'); }
   alarm(): void { this._playSFX('alarm'); }
@@ -109,10 +114,15 @@ export class AudioManager extends Component {
     }
   }
 
-  private _playSFX(name: string): void {
+  private _playSFX(name: string, volume: number = 1, heavy: boolean = false): void {
     if (this._muted) return;
     const clip = this._clips.get(name);
-    if (!clip || !this.sfxSource) return;
-    this.sfxSource.playOneShot(clip, 1.0);
+    const source = heavy && this.heavySfxSource ? this.heavySfxSource : this.sfxSource;
+    if (!clip || !source) return;
+    if (heavy) {
+      source.playOneShot(clip, Math.max(0, Math.min(1.8, volume)));
+      return;
+    }
+    source.playOneShot(clip, Math.max(0, Math.min(1.6, volume)));
   }
 }

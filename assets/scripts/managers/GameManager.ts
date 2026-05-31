@@ -3,7 +3,7 @@
  * 协调所有游戏系统，主循环，状态机
  */
 
-import { _decorator, Component, Node, instantiate, Prefab, tween, Vec3, Color, Tween, input, Input, KeyCode, director, Sprite, UIOpacity, UITransform, Graphics, Label, Button } from 'cc';
+import { _decorator, Component, Node, instantiate, Prefab, tween, Vec3, Color, Tween, input, Input, KeyCode, director, Sprite, UIOpacity, UITransform, Graphics, Label, Button, SpriteFrame, resources, Vec3 as CcVec3 } from 'cc';
 import { GameConfig, PermanentUpgradeId, SupplyCardStar, SupplyCardType, SupplyChestConfigData, SupplyChestQuality, SupplyMode, SupplyOptionData, WaveDefinitionData, WeaponEvolutionData, WeaponEvolutionId } from '../data/GameConfig';
 import { WeaponTierSystem } from '../components/WeaponTierSystem';
 import { AttackTarget, PlayerCar } from '../components/PlayerCar';
@@ -33,6 +33,20 @@ interface ChestSlotData {
 
 @ccclass('GameManager')
 export class GameManager extends Component {
+  private static readonly MAX_ACTIVE_EXPLOSIONS = 14;
+  private static readonly AIRSTRIKE_HIT_FX_LIMIT = 8;
+  private static readonly AIRSTRIKE_EXPLOSION_FX_LIMIT = 5;
+  private static readonly AIRSTRIKE_DAMAGE_DELAY = 0.56;
+  private static readonly SHOCKWAVE_HIT_FX_LIMIT = 5;
+  private static readonly SHOCKWAVE_DAMAGE_DELAY = 0.54;
+  private static readonly AREA_DAMAGE_FX_MIN_SIZE = 92;
+  private static readonly AREA_DAMAGE_FX_SIZE_MULTIPLIER = 0.26;
+  private static readonly AREA_DAMAGE_FX_SCALE_STAGE_1 = 0.32;
+  private static readonly AREA_DAMAGE_FX_SCALE_STAGE_2 = 0.52;
+  private static readonly AREA_DAMAGE_FX_SCALE_STAGE_3 = 0.74;
+  private static readonly POPUP_SHOW_DURATION = 0.28;
+  private static readonly POPUP_HIDE_DURATION = 0.18;
+
   // 预制体引用（需在编辑器绑定）
   @property(Prefab)
   bulletPrefab: Prefab | null = null;
@@ -54,6 +68,7 @@ export class GameManager extends Component {
 
   @property(Node)
   explosionGraphicsNode: Node | null = null;
+  private _explosionGraphics: Graphics | null = null;
 
   // 伤害闪烁效果
   private _damageFlashNode: Node | null = null;
@@ -90,6 +105,9 @@ export class GameManager extends Component {
   private _trails: TrailVisualData[] = [];
   private _lightnings: LightningVisualData[] = [];
   private _fragments: FragmentVisualData[] = [];
+  private _areaExplosionFrame: SpriteFrame | null = null;
+  private _suppressEnemyKillFx: number = 0;
+  private _enemyRenderOrderTimer: number = 0;
   private _kills: number = 0;
   private _reviveUsed: boolean = false;
   private _baseRunReward: RunReward = { coins: 0, parts: 0 };
@@ -133,6 +151,8 @@ export class GameManager extends Component {
   private _reviveBodyLabel: Label | null = null;
   private _reviveAdButtonNode: Node | null = null;
   private _reviveGiveUpButtonNode: Node | null = null;
+  private _reviveBackdropNode: Node | null = null;
+  private _reviveDialogPanelNode: Node | null = null;
   private _supplyPanelNode: Node | null = null;
   private _supplyPanelTitleLabel: Label | null = null;
   private _supplyPanelHintLabel: Label | null = null;
@@ -140,6 +160,8 @@ export class GameManager extends Component {
   private _supplyPanelStatusLabel: Label | null = null;
   private _supplyPanelAdButton: Node | null = null;
   private _supplyPanelAdCountLabel: Label | null = null;
+  private _supplyPanelBlockerNode: Node | null = null;
+  private _supplyPanelRootNode: Node | null = null;
   private _waveBannerNode: Node | null = null;
   private _waveSupportTimers: Map<string, number> = new Map();
   private _supplyChests: SupplyChest[] = [];
@@ -217,10 +239,9 @@ export class GameManager extends Component {
       // StartScreen
       this._startScreenNode = overlayNode?.getChildByName('StartScreen') || null;
       if (this._startScreenNode) {
-        this._startScreenNode.active = true;
         const startScreen = this._startScreenNode.getComponent(StartScreen);
         if (startScreen) {
-          this._startScreenNode.active = true;
+          startScreen.show(false);
           startScreen.setOnStart(() => {
             console.log('[GameManager] 开始游戏');
             this.startGame();
@@ -292,7 +313,7 @@ export class GameManager extends Component {
             if (this._gameOverScreen) this._gameOverScreen.hide();
             if (this._hud) this._hud.node.active = false;
             this._syncCurrentStageSelectionFromProgress();
-            if (this._startScreenNode) this._startScreenNode.active = true;
+            this._startScreenNode?.getComponent(StartScreen)?.show();
             this._refreshStartStageInfo();
             this._refreshPauseButtonState();
           });
@@ -318,10 +339,13 @@ export class GameManager extends Component {
       const gameLayer = canvas?.getChildByName('GameLayer');
       this.explosionGraphicsNode = gameLayer?.getChildByName('ExplosionGraphics') || null;
       if (this.explosionGraphicsNode) {
+        this._explosionGraphics = this.explosionGraphicsNode.getComponent(Graphics);
         console.log('[GameManager] ExplosionGraphics node found:', this.explosionGraphicsNode.name);
       } else {
         console.warn('[GameManager] ExplosionGraphics node NOT found!');
       }
+    } else {
+      this._explosionGraphics = this.explosionGraphicsNode.getComponent(Graphics);
     }
 
     // 创建或获取屏幕伤害闪烁节点
@@ -398,6 +422,7 @@ export class GameManager extends Component {
   }
 
   start(): void {
+    this._loadVfxResources();
   }
 
   update(dt: number): void {
@@ -426,6 +451,17 @@ export class GameManager extends Component {
         }
         break;
     }
+  }
+
+  private _loadVfxResources(): void {
+    if (this._areaExplosionFrame) return;
+    resources.load('vfx/area-explosion-v1/spriteFrame', SpriteFrame, (err, frame) => {
+      if (err) {
+        console.warn('[GameManager] failed to load area explosion sprite:', err);
+        return;
+      }
+      this._areaExplosionFrame = frame;
+    });
   }
 
   private _updatePlaying(dt: number): void {
@@ -552,7 +588,7 @@ export class GameManager extends Component {
     this._updateTrails(dt);
     this._updateLightnings(dt);
     this._updateFragments(dt);
-    this._refreshEnemyRenderOrder();
+    this._refreshEnemyRenderOrder(dt);
 
     // 清理死亡敌人并回收到对象池（节点保留在父节点下，通过 active 控制显隐）
     const removedEnemies = this._waveManager.cleanupEnemies(dt);
@@ -594,12 +630,12 @@ export class GameManager extends Component {
     if (!this._weaponTierSystem) return;
     const eCfg = GameConfig.enemy;
     const bCfg = GameConfig.bullet;
-    const collisionEnemies = this._enemies.filter(enemy => !enemy.dead);
+    const activeChests = this._getActiveSupplyChests();
 
     this._bullets.forEach(b => {
       if (b.dead) return;
 
-      for (const chest of this._getActiveSupplyChests()) {
+      for (const chest of activeChests) {
         const chestDx = b.x - chest.x;
         const chestDy = b.y - chest.y;
         const chestThreshold = chest.radius + bCfg.radius;
@@ -610,8 +646,8 @@ export class GameManager extends Component {
       }
 
       const bestEnemy =
-        this._pickBestCollisionEnemy(b, collisionEnemies.filter(enemy => enemy.reachedRail), eCfg.width / 2 + bCfg.radius) ||
-        this._pickBestCollisionEnemy(b, collisionEnemies, eCfg.width / 2 + bCfg.radius);
+        this._pickBestCollisionEnemy(b, this._enemies, eCfg.width / 2 + bCfg.radius, true) ||
+        this._pickBestCollisionEnemy(b, this._enemies, eCfg.width / 2 + bCfg.radius);
 
       if (bestEnemy) {
         this._audioManager?.enemyHit();
@@ -620,7 +656,7 @@ export class GameManager extends Component {
     });
   }
 
-  private _pickBestCollisionEnemy(bullet: Bullet, enemies: Enemy[], threshold: number): Enemy | null {
+  private _pickBestCollisionEnemy(bullet: Bullet, enemies: Enemy[], threshold: number, reachedRailOnly: boolean = false): Enemy | null {
     if (enemies.length === 0) return null;
 
     let bestEnemy: Enemy | null = null;
@@ -630,6 +666,8 @@ export class GameManager extends Component {
     const thresholdSq = threshold * threshold;
 
     for (const enemy of enemies) {
+      if (enemy.dead) continue;
+      if (reachedRailOnly && !enemy.reachedRail) continue;
       const dx = bullet.x - enemy.x;
       const dy = bullet.y - enemy.y;
       const distSq = dx * dx + dy * dy;
@@ -651,8 +689,12 @@ export class GameManager extends Component {
     return bestEnemy;
   }
 
-  private _refreshEnemyRenderOrder(): void {
+  private _refreshEnemyRenderOrder(dt: number): void {
     if (!this.enemiesNode || this._enemies.length <= 1) return;
+    this._enemyRenderOrderTimer += dt;
+    if (this._enemyRenderOrderTimer < 0.08) return;
+    this._enemyRenderOrderTimer = 0;
+
     const ordered = [...this._enemies].filter(enemy => !enemy.dead && enemy.node.parent === this.enemiesNode);
     ordered.sort((a, b) => b.y - a.y);
     ordered.forEach((enemy, index) => {
@@ -761,8 +803,10 @@ export class GameManager extends Component {
 
   private _handleEnemyKilled(enemy: Enemy): void {
     this._kills++;
-    this._spawnExplosion(enemy.x, enemy.y);
-    this._audioManager?.explode();
+    if (this._suppressEnemyKillFx <= 0) {
+      this._spawnExplosion(enemy.x, enemy.y);
+      this._audioManager?.explode();
+    }
   }
 
   private _updateSpecialEnemies(enemies: Enemy[], dt: number): void {
@@ -909,6 +953,9 @@ export class GameManager extends Component {
   }
 
   private _spawnExplosion(x: number, y: number): void {
+    if (this._explosions.length >= GameManager.MAX_ACTIVE_EXPLOSIONS) {
+      this._explosions.shift();
+    }
     this._explosions.push({
       x, y,
       particles: this._generateExplosionParticles(x, y),
@@ -1141,7 +1188,7 @@ export class GameManager extends Component {
   }
 
   private _updateExplosions(dt: number): void {
-    const graphics = this.explosionGraphicsNode?.getComponent(Graphics);
+    const graphics = this._explosionGraphics;
     if (!graphics) {
       return;
     }
@@ -1177,7 +1224,7 @@ export class GameManager extends Component {
   }
 
   private _updatePulses(dt: number): void {
-    const graphics = this.explosionGraphicsNode?.getComponent(Graphics);
+    const graphics = this._explosionGraphics;
     if (!graphics) return;
 
     const colorCache = new Color();
@@ -1198,7 +1245,7 @@ export class GameManager extends Component {
   }
 
   private _updateTrails(dt: number): void {
-    const graphics = this.explosionGraphicsNode?.getComponent(Graphics);
+    const graphics = this._explosionGraphics;
     if (!graphics) return;
 
     const colorCache = new Color();
@@ -1218,7 +1265,7 @@ export class GameManager extends Component {
   }
 
   private _updateLightnings(dt: number): void {
-    const graphics = this.explosionGraphicsNode?.getComponent(Graphics);
+    const graphics = this._explosionGraphics;
     if (!graphics) return;
 
     const colorCache = new Color();
@@ -1240,7 +1287,7 @@ export class GameManager extends Component {
   }
 
   private _updateFragments(dt: number): void {
-    const graphics = this.explosionGraphicsNode?.getComponent(Graphics);
+    const graphics = this._explosionGraphics;
     if (!graphics) return;
 
     const fillColor = new Color();
@@ -1365,7 +1412,7 @@ export class GameManager extends Component {
     }
 
     this._refreshRevivePanelContent();
-    this._revivePanelNode.active = true;
+    this._playRevivePanelShow();
   }
 
   private async _handleReviveAd(): Promise<void> {
@@ -1379,31 +1426,41 @@ export class GameManager extends Component {
     }
 
     this._reviveUsed = true;
-    this._closeRevivePanel();
-    const bonus = this._progressManager.getPermanentBonuses();
-    this._playerCar.reviveWithHpRatio(
-      GameConfig.gameplay.revive.hpRatio + bonus.reviveHpBonusRatio,
-      GameConfig.gameplay.revive.invulnerableSeconds + bonus.reviveShieldSeconds
-    );
+    this._closeRevivePanel(() => {
+      if (!this._playerCar || !this._waveManager) return;
+      const bonus = this._progressManager.getPermanentBonuses();
+      this._playerCar.reviveWithHpRatio(
+        GameConfig.gameplay.revive.hpRatio + bonus.reviveHpBonusRatio,
+        GameConfig.gameplay.revive.invulnerableSeconds + bonus.reviveShieldSeconds
+      );
 
-    const clearRange = GameConfig.gameplay.revive.clearRailRange;
-    for (const enemy of this._waveManager.activeEnemies) {
-      if (enemy.reachedRail || enemy.y <= GameConfig.bridge.railY + clearRange) {
-        enemy.pushBack(clearRange);
-        enemy.freeze(1);
+      const clearRange = GameConfig.gameplay.revive.clearRailRange;
+      for (const enemy of this._waveManager.activeEnemies) {
+        if (enemy.reachedRail || enemy.y <= GameConfig.bridge.railY + clearRange) {
+          enemy.pushBack(clearRange);
+          enemy.freeze(1);
+        }
       }
-    }
 
-    if (this._damageFlashNode) this._damageFlashNode.active = true;
-    if (this._hud) this._hud.node.active = true;
-    this._state = 'playing';
-    this._refreshPauseButtonState();
+      if (this._damageFlashNode) this._damageFlashNode.active = true;
+      if (this._hud) this._hud.node.active = true;
+      this._state = 'playing';
+      this._refreshPauseButtonState();
+    });
   }
 
-  private _closeRevivePanel(): void {
-    if (this._revivePanelNode?.isValid) {
-      this._revivePanelNode.active = false;
+  private _closeRevivePanel(afterClose?: () => void): void {
+    if (!this._revivePanelNode?.isValid) {
+      afterClose?.();
+      return;
     }
+
+    this._playPopupHide(
+      this._revivePanelNode,
+      this._reviveBackdropNode,
+      this._reviveDialogPanelNode,
+      afterClose
+    );
   }
 
   onReviveAdClick(): void {
@@ -1412,8 +1469,9 @@ export class GameManager extends Component {
 
   onReviveGiveUpClick(): void {
     if (this._state !== 'revive') return;
-    this._closeRevivePanel();
-    this._enterGameOver();
+    this._closeRevivePanel(() => {
+      this._enterGameOver();
+    });
   }
 
   private _enterGameOver(): void {
@@ -1567,10 +1625,11 @@ export class GameManager extends Component {
           renderPanel(`已刷新补给卡 · ${this._getChestQualityName(refreshQuality)}品质概率提升`);
         },
         (option, nodes) => {
-          this._applySupplyOption(option);
           if (this._supplyPanelStatusLabel) this._supplyPanelStatusLabel.string = `已获得: ${option.title}`;
           nodes.forEach(node => this._setButtonEnabled(node, false));
-          this._closeSupplyPanel(true);
+          this._closeSupplyPanelWithCallback(true, () => {
+            this._applySupplyOptionAfterPanelClose(option);
+          });
         }
       );
     };
@@ -1625,9 +1684,11 @@ export class GameManager extends Component {
           renderPanel(`已刷新补给卡 · ${this._getChestQualityName(currentQuality)}品质概率提升`);
         },
         (option) => {
-          this._applySupplyOption(option);
-          this._showFloatingNotice(chest.x, chest.y + 44, option.title, new Color(255, 228, 150));
-          this._closeSupplyPanel(true);
+          this._closeSupplyPanelWithCallback(true, () => {
+            this._applySupplyOptionAfterPanelClose(option, () => {
+              this._showFloatingNotice(chest.x, chest.y + 44, option.title, new Color(255, 228, 150));
+            });
+          });
         }
       );
     };
@@ -1661,9 +1722,11 @@ export class GameManager extends Component {
         if (this._supplyPanelStatusLabel) this._supplyPanelStatusLabel.string = '高级补给不可再次升级';
       },
       (option) => {
-        this._applySupplyOption(option);
-        this._showFloatingNotice(chest.x, chest.y + 44, option.title, new Color(255, 228, 150));
-        this._closeSupplyPanel(true);
+        this._closeSupplyPanelWithCallback(true, () => {
+          this._applySupplyOptionAfterPanelClose(option, () => {
+            this._showFloatingNotice(chest.x, chest.y + 44, option.title, new Color(255, 228, 150));
+          });
+        });
       }
     );
     this._state = 'supply';
@@ -1830,6 +1893,31 @@ export class GameManager extends Component {
     }
   }
 
+  private _applySupplyOptionAfterPanelClose(option: SupplyOptionData, afterApply?: () => void): void {
+    const apply = (): void => {
+      this._applySupplyOption(option);
+      afterApply?.();
+    };
+
+    if (this._isDelayedVisualSupplyOption(option)) {
+      this.scheduleOnce(apply, 0);
+      return;
+    }
+
+    apply();
+  }
+
+  private _isDelayedVisualSupplyOption(option: SupplyOptionData): boolean {
+    switch (option.effect.type) {
+      case 'freezeAll':
+      case 'shockwave':
+      case 'airstrike':
+        return true;
+      default:
+        return false;
+    }
+  }
+
   private _getUpgradedChestQuality(quality: SupplyChestQuality): SupplyChestQuality | null {
     switch (quality) {
       case 'normal':
@@ -1936,33 +2024,229 @@ export class GameManager extends Component {
   }
 
   private _applyShockwave(distance: number, damage: number): void {
-    const enemies = this._enemies.filter(enemy => !enemy.dead);
-    if (enemies.length === 0) return;
     const originX = this._playerCar?.x || 0;
     const originY = (this._playerCar?.y || GameConfig.bridge.railY) + 96;
-    this._spawnPulse(originX, originY, 300, '#ffcb8f', 0.28);
-    this._spawnBurstRing(originX, originY, 190, '#ff9d4d');
-    for (const enemy of enemies) {
-      enemy.pushBack(distance);
-      enemy.freeze(0.6);
-      if (damage > 0) {
-        this._damageEnemy(enemy, damage);
-      }
-    }
-    this._showFloatingNotice(originX, originY + 28, '震荡清场', new Color(255, 220, 168));
+    this._playVisibleEnemyAreaDamageFx({
+      centerX: originX,
+      centerY: originY,
+      maxBlastRadius: 330,
+      coreHex: '#ffcb8f',
+      flashHex: '#ffd79c',
+      damageDelay: GameManager.SHOCKWAVE_DAMAGE_DELAY,
+      noticeText: '震荡清场',
+      noticeColor: new Color(255, 220, 168),
+      noticeX: originX,
+      noticeY: originY + 28,
+      onDamage: (enemy) => {
+        enemy.pushBack(distance);
+        if (damage > 0) {
+          this._damageEnemy(enemy, damage);
+        }
+      },
+    });
   }
 
   private _applyAirstrike(damage: number, radius: number): void {
-    const enemies = this._enemies.filter(enemy => !enemy.dead);
+    this._playVisibleEnemyAreaDamageFx({
+      centerX: 0,
+      centerY: GameConfig.bridge.railY + 180,
+      maxBlastRadius: Math.max(360, radius * 3.2),
+      coreHex: '#ffb55f',
+      flashHex: '#ffe7b4',
+      damageDelay: GameManager.AIRSTRIKE_DAMAGE_DELAY,
+      noticeText: '空袭支援',
+      noticeColor: new Color(255, 215, 150),
+      noticeX: 0,
+      noticeY: GameConfig.bridge.top - 40,
+      onDamage: (enemy) => {
+        this._damageEnemy(enemy, Math.max(1, damage));
+      },
+    });
+  }
+
+  private _playVisibleEnemyAreaDamageFx(config: {
+    centerX: number;
+    centerY: number;
+    maxBlastRadius: number;
+    coreHex: string;
+    flashHex: string;
+    damageDelay: number;
+    noticeText: string;
+    noticeColor: Color;
+    noticeX: number;
+    noticeY: number;
+    onDamage: (enemy: Enemy) => void;
+  }): void {
+    const enemies = this._getAliveEnemiesSnapshot();
     if (enemies.length === 0) return;
-    const hitRadius = Math.max(48, radius);
-    for (const enemy of enemies) {
-      this._spawnTrail(enemy.x, enemy.y + 180, enemy.x, enemy.y + 18, '#ffe3b4', 0.14, 2.8);
-      this._spawnPulse(enemy.x, enemy.y, hitRadius * 0.7, '#ffb55f', 0.22);
-      this._spawnBurstRing(enemy.x, enemy.y, hitRadius * 0.55, '#ff7f32');
-      this._damageEnemy(enemy, Math.max(1, damage));
+
+    const hitPositions = enemies.map(enemy => ({ x: enemy.x, y: enemy.y }));
+    this._showAreaBlastFx(
+      hitPositions,
+      config.centerX,
+      config.centerY,
+      config.maxBlastRadius,
+      config.coreHex,
+      config.flashHex
+    );
+
+    this.scheduleOnce(() => {
+      this._suppressEnemyKillFx++;
+      for (const enemy of enemies) {
+        if (!enemy.dead) {
+          config.onDamage(enemy);
+        }
+      }
+      this._suppressEnemyKillFx--;
+    }, config.damageDelay);
+
+    this._showFloatingNotice(config.noticeX, config.noticeY, config.noticeText, config.noticeColor);
+  }
+
+  private _showAreaBlastFx(
+    hitPositions: Array<{ x: number; y: number }>,
+    centerX: number,
+    centerY: number,
+    maxBlastRadius: number,
+    coreHex: string,
+    flashHex: string
+  ): void {
+    const parent = this.explosionGraphicsNode?.parent || this.explosionGraphicsNode;
+    if (!parent || hitPositions.length === 0) return;
+
+    const node = new Node('AreaBlastFx');
+    const transform = node.addComponent(UITransform);
+    transform.setContentSize(GameConfig.canvas.width, GameConfig.canvas.height);
+    node.setPosition(0, 0, 0);
+    const opacity = node.addComponent(UIOpacity);
+    opacity.opacity = 255;
+    parent.addChild(node);
+
+    const count = Math.min(GameManager.AIRSTRIKE_HIT_FX_LIMIT, hitPositions.length);
+    const sampledHits: Array<{ x: number; y: number }> = [];
+    for (let i = 0; i < count; i++) {
+      const index = Math.floor((i + 0.5) * hitPositions.length / count);
+      sampledHits.push(hitPositions[Math.min(hitPositions.length - 1, index)]);
     }
-    this._showFloatingNotice(0, GameConfig.bridge.top - 40, '空袭支援', new Color(255, 215, 150));
+
+    if (this._areaExplosionFrame) {
+      const echoNodes = sampledHits.map((pos, index) => {
+        const echoNode = new Node(`ExplosionEcho_${index}`);
+        const echoTransform = echoNode.addComponent(UITransform);
+        const echoSize = Math.max(
+          GameManager.AREA_DAMAGE_FX_MIN_SIZE,
+          maxBlastRadius * GameManager.AREA_DAMAGE_FX_SIZE_MULTIPLIER
+        );
+        echoTransform.setContentSize(echoSize, echoSize);
+        echoNode.setPosition(pos.x, pos.y, 0);
+        echoNode.setScale(new CcVec3(0.18, 0.18, 1));
+        const echoSprite = echoNode.addComponent(Sprite);
+        echoSprite.spriteFrame = this._areaExplosionFrame;
+        echoSprite.color = index % 2 === 0
+          ? new Color(255, 244, 218, 220)
+          : new Color(255, 226, 184, 205);
+        const echoOpacity = echoNode.addComponent(UIOpacity);
+        echoOpacity.opacity = 0;
+        node.addChild(echoNode);
+        return { node: echoNode, opacity: echoOpacity };
+      });
+
+      tween(opacity)
+        .to(0.16, { opacity: 255 })
+        .to(0.56, { opacity: 220 })
+        .to(0.32, { opacity: 0 })
+        .call(() => {
+          if (node.isValid) {
+            node.destroy();
+          }
+        })
+        .start();
+
+      echoNodes.forEach(({ node: echoNode, opacity: echoOpacity }, index) => {
+        const delay = 0.03 + index * 0.06;
+        const volume = Math.max(0.72, 1.34 - index * 0.1);
+        this.scheduleOnce(() => {
+          this._audioManager?.heavyExplodeAt(volume);
+        }, delay);
+        tween(echoOpacity)
+          .delay(delay)
+          .to(0.1, { opacity: 235 })
+          .to(0.34, { opacity: 150 })
+          .to(0.24, { opacity: 0 })
+          .start();
+        tween(echoNode)
+          .delay(delay)
+          .to(0.16, { scale: new CcVec3(GameManager.AREA_DAMAGE_FX_SCALE_STAGE_1, GameManager.AREA_DAMAGE_FX_SCALE_STAGE_1, 1) })
+          .to(0.28, { scale: new CcVec3(GameManager.AREA_DAMAGE_FX_SCALE_STAGE_2, GameManager.AREA_DAMAGE_FX_SCALE_STAGE_2, 1) })
+          .to(0.24, { scale: new CcVec3(GameManager.AREA_DAMAGE_FX_SCALE_STAGE_3, GameManager.AREA_DAMAGE_FX_SCALE_STAGE_3, 1) })
+          .start();
+      });
+      return;
+    }
+
+    const graphics = node.addComponent(Graphics);
+    const state = { t: 0 };
+    const draw = (): void => {
+      const t = Math.max(0, Math.min(1, state.t));
+      const charge = Math.min(1, t / 0.5);
+      const blast = Math.max(0, (t - 0.22) / 0.78);
+      const fade = 1 - Math.max(0, (t - 0.84) / 0.16);
+
+      graphics.clear();
+
+      const flash = new Color();
+      flash.fromHEX(flashHex);
+      flash.a = Math.floor(210 * (1 - Math.min(1, blast * 0.9)) * fade);
+      graphics.fillColor = flash;
+      graphics.circle(centerX, centerY, 42 + charge * 76);
+      graphics.fill();
+
+      const core = new Color();
+      core.fromHEX(coreHex);
+      core.a = Math.floor(225 * fade);
+      graphics.fillColor = core;
+      graphics.circle(centerX, centerY, 70 + blast * (maxBlastRadius * 0.7));
+      graphics.fill();
+
+      const smoke = new Color(56, 34, 24, Math.floor(108 * fade));
+      graphics.fillColor = smoke;
+      graphics.circle(centerX, centerY, 150 + blast * (maxBlastRadius * 0.82));
+      graphics.fill();
+
+      const burst = new Color();
+      burst.fromHEX(coreHex);
+      burst.a = Math.floor(180 * fade);
+      graphics.fillColor = burst;
+      for (const pos of sampledHits) {
+        graphics.circle(pos.x, pos.y, 22 + blast * 72);
+        graphics.fill();
+      }
+
+      const spark = new Color();
+      spark.fromHEX(flashHex);
+      spark.a = Math.floor(210 * fade);
+      graphics.fillColor = spark;
+      for (const pos of sampledHits) {
+        graphics.circle(pos.x, pos.y, 10 + blast * 30);
+        graphics.fill();
+      }
+    };
+    draw();
+
+    tween(state)
+      .to(2.4, { t: 1 }, { onUpdate: draw })
+      .call(() => node.destroy())
+      .start();
+  }
+
+  private _getAliveEnemiesSnapshot(): Enemy[] {
+    const alive: Enemy[] = [];
+    for (const enemy of this._enemies) {
+      if (!enemy.dead) {
+        alive.push(enemy);
+      }
+    }
+    return alive;
   }
 
   private _getSupplyCardTypeLabel(cardType: SupplyCardType): string {
@@ -2032,15 +2316,31 @@ export class GameManager extends Component {
   }
 
   private _closeSupplyPanel(resumeGame: boolean): void {
-    if (this._supplyPanelNode?.isValid) {
-      this._supplyPanelNode.active = false;
+    this._closeSupplyPanelWithCallback(resumeGame);
+  }
+
+  private _closeSupplyPanelWithCallback(resumeGame: boolean, afterClose?: () => void): void {
+    const finalize = (): void => {
+      this._adsManager.hideBanner();
+      this._unfreezeBattle();
+      if (resumeGame) {
+        this._state = 'playing';
+      }
+      this._refreshPauseButtonState();
+      afterClose?.();
+    };
+
+    if (!this._supplyPanelNode?.isValid) {
+      finalize();
+      return;
     }
-    this._adsManager.hideBanner();
-    this._unfreezeBattle();
-    if (resumeGame) {
-      this._state = 'playing';
-    }
-    this._refreshPauseButtonState();
+
+    this._playPopupHide(
+      this._supplyPanelNode,
+      this._supplyPanelBlockerNode,
+      this._supplyPanelRootNode,
+      finalize
+    );
   }
 
   private _getSupplyMode(): SupplyMode {
@@ -2290,13 +2590,12 @@ export class GameManager extends Component {
   ): void {
     this._cacheSupplyPanelRefs();
     if (!this._supplyPanelNode) return;
-    this._supplyPanelNode.active = true;
     if (this._supplyPanelTitleLabel) this._supplyPanelTitleLabel.string = title;
     if (this._supplyPanelHintLabel) this._supplyPanelHintLabel.string = hint;
     if (this._supplyPanelSubTitleLabel) this._supplyPanelSubTitleLabel.string = subTitle;
     if (this._supplyPanelStatusLabel) this._supplyPanelStatusLabel.string = status;
 
-    const panelRoot = this._supplyPanelNode.getChildByName('PanelRoot');
+    const panelRoot = this._supplyPanelRootNode || this._supplyPanelNode.getChildByName('PanelRoot');
     const cardsRoot = panelRoot?.getChildByName('Cards');
     const cardNames = ['CardLeft', 'CardCenter', 'CardRight'];
     const cardNodes = cardNames
@@ -2362,6 +2661,7 @@ export class GameManager extends Component {
       this._supplyPanelAdButton.on(Node.EventType.TOUCH_END, () => { void onAdClick(); }, this);
     }
     this._refreshSupplyAdArea();
+    this._playSupplyPanelShow(cardNodes);
   }
 
   private _refreshSupplyAdArea(): void {
@@ -2394,11 +2694,15 @@ export class GameManager extends Component {
       this._supplyPanelStatusLabel = null;
       this._supplyPanelAdButton = null;
       this._supplyPanelAdCountLabel = null;
+      this._supplyPanelBlockerNode = null;
+      this._supplyPanelRootNode = null;
       return;
     }
 
     this._supplyPanelNode.active = false;
-    const panelRoot = this._supplyPanelNode.getChildByName('PanelRoot');
+    this._supplyPanelBlockerNode = this._supplyPanelNode.getChildByName('Blocker') || null;
+    this._supplyPanelRootNode = this._supplyPanelNode.getChildByName('PanelRoot') || null;
+    const panelRoot = this._supplyPanelRootNode;
     this._supplyPanelTitleLabel = panelRoot?.getChildByName('TitleLabel')?.getComponent(Label) || null;
     this._supplyPanelHintLabel = panelRoot?.getChildByName('HintLabel')?.getComponent(Label) || null;
     this._supplyPanelSubTitleLabel = panelRoot?.getChildByName('SubTitleLabel')?.getComponent(Label) || null;
@@ -2413,7 +2717,9 @@ export class GameManager extends Component {
       || null;
 
     this._revivePanelNode = overlay?.getChildByName('ReviveOfferPanel') || null;
-    const dialogPanel = this._revivePanelNode?.getChildByName('DialogPanel') || null;
+    this._reviveBackdropNode = this._revivePanelNode?.getChildByName('Backdrop') || null;
+    this._reviveDialogPanelNode = this._revivePanelNode?.getChildByName('DialogPanel') || null;
+    const dialogPanel = this._reviveDialogPanelNode;
     this._reviveBodyLabel = dialogPanel?.getChildByName('BodyLabel')?.getComponent(Label) || null;
     this._reviveAdButtonNode = dialogPanel?.getChildByName('ReviveAdBtn') || null;
     this._reviveGiveUpButtonNode = dialogPanel?.getChildByName('GiveUpBtn') || null;
@@ -2432,6 +2738,177 @@ export class GameManager extends Component {
     const hpRatio = Math.round((GameConfig.gameplay.revive.hpRatio + bonus.reviveHpBonusRatio) * 100);
     const shieldSeconds = GameConfig.gameplay.revive.invulnerableSeconds + bonus.reviveShieldSeconds;
     this._reviveBodyLabel.string = `看广告复活\n恢复${hpRatio}%耐久，并获得${shieldSeconds}秒无敌`;
+  }
+
+  private _playSupplyPanelShow(cardNodes: Node[]): void {
+    const contentNodes: Node[] = [
+      this._supplyPanelTitleLabel?.node,
+      this._supplyPanelHintLabel?.node,
+      this._supplyPanelSubTitleLabel?.node,
+      this._supplyPanelStatusLabel?.node,
+      ...cardNodes,
+      this._supplyPanelAdButton,
+    ].filter((node): node is Node => Boolean(node));
+
+    this._playPopupShow(
+      this._supplyPanelNode,
+      this._supplyPanelBlockerNode,
+      this._supplyPanelRootNode,
+      contentNodes
+    );
+  }
+
+  private _playRevivePanelShow(): void {
+    const contentNodes: Node[] = [
+      this._reviveDialogPanelNode?.getChildByName('AccentBar') || null,
+      this._reviveDialogPanelNode?.getChildByName('TitleLabel') || null,
+      this._reviveBodyLabel?.node,
+      this._reviveDialogPanelNode?.getChildByName('HintLabel') || null,
+      this._reviveAdButtonNode,
+      this._reviveGiveUpButtonNode,
+    ].filter((node): node is Node => Boolean(node));
+
+    this._playPopupShow(
+      this._revivePanelNode,
+      this._reviveBackdropNode,
+      this._reviveDialogPanelNode,
+      contentNodes
+    );
+  }
+
+  private _playPopupShow(root: Node | null, maskNode: Node | null, panelNode: Node | null, contentNodes: Node[] = []): void {
+    if (!root?.isValid || !panelNode?.isValid) return;
+
+    root.active = true;
+    this._resetPopupMask(maskNode);
+    this._resetPopupPanel(panelNode);
+    const uniqueContentNodes = Array.from(new Set(contentNodes.filter(node => node?.isValid)));
+    uniqueContentNodes.forEach((node, index) => this._resetPopupContent(node, index));
+    const panelTarget = this._getPopupBasePosition(panelNode);
+
+    const maskOpacity = maskNode ? this._ensureOpacity(maskNode) : null;
+    if (maskOpacity) {
+      Tween.stopAllByTarget(maskOpacity);
+      tween(maskOpacity)
+        .to(GameManager.POPUP_SHOW_DURATION * 0.75, { opacity: 178 }, { easing: 'quadOut' })
+        .start();
+    }
+
+    Tween.stopAllByTarget(panelNode);
+    tween(panelNode)
+      .to(GameManager.POPUP_SHOW_DURATION * 0.58, {
+        scale: new Vec3(1.03, 1.03, 1),
+        position: panelTarget.clone(),
+      }, { easing: 'backOut' })
+      .to(GameManager.POPUP_SHOW_DURATION * 0.42, {
+        scale: new Vec3(1, 1, 1),
+        position: panelTarget,
+      }, { easing: 'quadOut' })
+      .start();
+
+    const panelOpacity = this._ensureOpacity(panelNode);
+    Tween.stopAllByTarget(panelOpacity);
+    tween(panelOpacity)
+      .to(GameManager.POPUP_SHOW_DURATION * 0.82, { opacity: 255 }, { easing: 'quadOut' })
+      .start();
+
+    uniqueContentNodes.forEach((node, index) => {
+      const opacity = this._ensureOpacity(node);
+      const targetPosition = this._getPopupBasePosition(node);
+      Tween.stopAllByTarget(node);
+      Tween.stopAllByTarget(opacity);
+      tween(opacity)
+        .delay(0.04 + index * 0.028)
+        .to(0.16, { opacity: 255 }, { easing: 'quadOut' })
+        .start();
+      tween(node)
+        .delay(0.04 + index * 0.028)
+        .to(0.18, { position: targetPosition }, { easing: 'backOut' })
+        .start();
+    });
+  }
+
+  private _playPopupHide(root: Node | null, maskNode: Node | null, panelNode: Node | null, afterClose?: () => void): void {
+    if (!root?.isValid || !panelNode?.isValid) {
+      if (root?.isValid) root.active = false;
+      afterClose?.();
+      return;
+    }
+
+    const maskOpacity = maskNode ? this._ensureOpacity(maskNode) : null;
+    if (maskOpacity) {
+      Tween.stopAllByTarget(maskOpacity);
+      tween(maskOpacity)
+        .to(GameManager.POPUP_HIDE_DURATION, { opacity: 0 }, { easing: 'quadIn' })
+        .start();
+    }
+
+    const panelOpacity = this._ensureOpacity(panelNode);
+    Tween.stopAllByTarget(panelOpacity);
+    tween(panelOpacity)
+      .to(GameManager.POPUP_HIDE_DURATION, { opacity: 0 }, { easing: 'quadIn' })
+      .start();
+
+    Tween.stopAllByTarget(panelNode);
+    tween(panelNode)
+      .to(GameManager.POPUP_HIDE_DURATION, {
+        scale: new Vec3(0.96, 0.96, 1),
+        position: this._getPopupBasePosition(panelNode).clone().add3f(0, -12, 0),
+      }, { easing: 'quadIn' })
+      .call(() => {
+        if (root.isValid) {
+          root.active = false;
+        }
+        if (panelNode.isValid) {
+          panelNode.setScale(1, 1, 1);
+          panelNode.setPosition(this._getPopupBasePosition(panelNode));
+          this._ensureOpacity(panelNode).opacity = 255;
+        }
+        if (maskNode?.isValid) {
+          this._ensureOpacity(maskNode).opacity = 0;
+        }
+        afterClose?.();
+      })
+      .start();
+  }
+
+  private _resetPopupMask(node: Node | null): void {
+    if (!node?.isValid) return;
+    const opacity = this._ensureOpacity(node);
+    Tween.stopAllByTarget(opacity);
+    opacity.opacity = 0;
+  }
+
+  private _resetPopupPanel(node: Node): void {
+    const opacity = this._ensureOpacity(node);
+    const basePosition = this._getPopupBasePosition(node);
+    Tween.stopAllByTarget(node);
+    Tween.stopAllByTarget(opacity);
+    node.setScale(0.92, 0.92, 1);
+    node.setPosition(basePosition.clone().add3f(0, 22, 0));
+    opacity.opacity = 0;
+  }
+
+  private _resetPopupContent(node: Node, index: number): void {
+    if (!node?.isValid) return;
+    const opacity = this._ensureOpacity(node);
+    const basePosition = this._getPopupBasePosition(node);
+    Tween.stopAllByTarget(node);
+    Tween.stopAllByTarget(opacity);
+    node.setPosition(basePosition.clone().add3f(0, 10 + Math.min(index, 3) * 2, 0));
+    opacity.opacity = 0;
+  }
+
+  private _getPopupBasePosition(node: Node): Vec3 {
+    const carrier = node as Node & { __popupBasePosition?: Vec3 };
+    if (!carrier.__popupBasePosition) {
+      carrier.__popupBasePosition = node.getPosition().clone();
+    }
+    return carrier.__popupBasePosition.clone();
+  }
+
+  private _ensureOpacity(node: Node): UIOpacity {
+    return node.getComponent(UIOpacity) || node.addComponent(UIOpacity);
   }
 
   private _addToOverlay(node: Node): void {
@@ -2606,9 +3083,9 @@ export class GameManager extends Component {
     this._audioManager?.startBGM();
 
     // 切换 UI 状态
-    if (this._startScreenNode) this._startScreenNode.active = false;
+    this._startScreenNode?.getComponent(StartScreen)?.hide();
     if (this._debugScreenNode) this._debugScreenNode.active = false;
-    if (this._garageScreenNode) this._garageScreenNode.active = false;
+    this._garageScreen?.hide();
     if (this._gameOverScreen) this._gameOverScreen.node.active = false;
     if (this._hud) this._hud.node.active = true;
     this._refreshPauseButtonState();
@@ -2620,31 +3097,31 @@ export class GameManager extends Component {
   }
 
   private _showDebugScreen(): void {
-    if (this._startScreenNode) this._startScreenNode.active = false;
-    if (this._garageScreenNode) this._garageScreenNode.active = false;
+    this._startScreenNode?.getComponent(StartScreen)?.hide();
+    this._garageScreen?.hide();
     if (this._debugScreenNode) this._debugScreenNode.active = true;
     this._refreshPauseButtonState();
   }
 
   private _hideDebugScreen(): void {
     if (this._debugScreenNode) this._debugScreenNode.active = false;
-    if (this._startScreenNode) this._startScreenNode.active = true;
+    this._startScreenNode?.getComponent(StartScreen)?.show();
     this._refreshStartStageInfo();
     this._refreshPauseButtonState();
   }
 
   private _showGarageScreen(): void {
     if (!this._garageScreenNode || !this._garageScreen) return;
-    if (this._startScreenNode) this._startScreenNode.active = false;
+    this._startScreenNode?.getComponent(StartScreen)?.hide();
     if (this._debugScreenNode) this._debugScreenNode.active = false;
-    this._garageScreenNode.active = true;
     this._garageScreen.refresh();
+    this._garageScreen.show();
     this._refreshPauseButtonState();
   }
 
   private _hideGarageScreen(): void {
-    if (this._garageScreenNode) this._garageScreenNode.active = false;
-    if (this._startScreenNode) this._startScreenNode.active = true;
+    this._garageScreen?.hide();
+    this._startScreenNode?.getComponent(StartScreen)?.show();
     this._refreshStartStageInfo();
     this._refreshPauseButtonState();
   }
@@ -3096,6 +3573,18 @@ export class GameManager extends Component {
     }
     if (!this._playerCar) return;
     if (this._state !== 'playing') return;
+    if (event.keyCode === KeyCode.DIGIT_7) {
+      this._applyShockwave(110, 20);
+      return;
+    }
+    if (event.keyCode === KeyCode.DIGIT_8) {
+      this._applyShockwave(170, 55);
+      return;
+    }
+    if (event.keyCode === KeyCode.DIGIT_9) {
+      this._applyAirstrike(180, 96);
+      return;
+    }
     if (event.keyCode === KeyCode.ARROW_LEFT || event.keyCode === KeyCode.KEY_A) {
       this._playerCar.setKeyLeft(true);
     }

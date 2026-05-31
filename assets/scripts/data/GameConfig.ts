@@ -31,6 +31,7 @@ export const GameConfig = {
     width: 106,        // 实际显示宽度（保持纵横比，统一画布）
     height: 112,      // 实际显示高度（含火焰特效）
     movePadding: 5,  // 左右移动边界留白，独立于显示宽度，避免手感过窄
+    touchSensitivity: 1.2, // 手指横向位移到战车横向位移的倍率，>1 时滑动更灵敏
     speed: 440,       // 键盘移动速度 px/s
     hp: 200,          // 血量
   },
@@ -212,7 +213,7 @@ export const GameConfig = {
   },
 
   // ============================================
-  // 波次编排（前 10 波）
+  // 波次编排（前 12 波）
   // kind 先用于内容编排和后续 UI 展示；超出配置后回落到默认 normal 波
   // ============================================
   waveDefs: [
@@ -227,7 +228,7 @@ export const GameConfig = {
     {
       kind: 'mixed',
       title: '快速接敌',
-      spawnInterval: 0.38,
+      spawnInterval: 0.5,
       entries: [
         { type: 'normal', count: 55 },
         { type: 'runner', count: 8 },
@@ -236,7 +237,7 @@ export const GameConfig = {
     {
       kind: 'mixed',
       title: '护栏试压',
-      spawnInterval: 0.34,
+      spawnInterval: 0.5,
       entries: [
         { type: 'normal', count: 70 },
         { type: 'runner', count: 16 },
@@ -246,7 +247,7 @@ export const GameConfig = {
     {
       kind: 'pressure',
       title: '装甲前压',
-      spawnInterval: 0.31,
+      spawnInterval: 0.5,
       entries: [
         { type: 'normal', count: 85 },
         { type: 'runner', count: 22 },
@@ -256,7 +257,7 @@ export const GameConfig = {
     {
       kind: 'pressure',
       title: '爆破试探',
-      spawnInterval: 0.28,
+      spawnInterval: 0.5,
       entries: [
         { type: 'normal', count: 90 },
         { type: 'runner', count: 24 },
@@ -267,7 +268,7 @@ export const GameConfig = {
     {
       kind: 'crisis',
       title: '连环突击',
-      spawnInterval: 0.25,
+      spawnInterval: 0.5,
       entries: [
         { type: 'normal', count: 100 },
         { type: 'runner', count: 28 },
@@ -278,7 +279,7 @@ export const GameConfig = {
     {
       kind: 'support',
       title: '后排医护',
-      spawnInterval: 0.23,
+      spawnInterval: 0.5,
       entries: [
         { type: 'normal', count: 110 },
         { type: 'runner', count: 30 },
@@ -290,7 +291,7 @@ export const GameConfig = {
     {
       kind: 'crisis',
       title: '交错冲锋',
-      spawnInterval: 0.21,
+      spawnInterval: 0.5,
       entries: [
         { type: 'normal', count: 120 },
         { type: 'runner', count: 34 },
@@ -302,7 +303,7 @@ export const GameConfig = {
     {
       kind: 'crisis',
       title: '极限突破',
-      spawnInterval: 0.19,
+      spawnInterval: 0.5,
       entries: [
         { type: 'normal', count: 130 },
         { type: 'runner', count: 36 },
@@ -314,7 +315,7 @@ export const GameConfig = {
     {
       kind: 'crisis',
       title: '高压推进',
-      spawnInterval: 0.18,
+      spawnInterval: 0.5,
       entries: [
         { type: 'normal', count: 140 },
         { type: 'runner', count: 40 },
@@ -326,7 +327,7 @@ export const GameConfig = {
     {
       kind: 'crisis',
       title: '火力封锁',
-      spawnInterval: 0.16,
+      spawnInterval: 0.5,
       entries: [
         { type: 'normal', count: 150 },
         { type: 'runner', count: 44 },
@@ -338,7 +339,7 @@ export const GameConfig = {
     {
       kind: 'boss',
       title: '指挥官战车',
-      spawnInterval: 0.18,
+      spawnInterval: 0.5,
       pauseTime: 8.0,
       entries: [
         { type: 'boss_commander', count: 1 },

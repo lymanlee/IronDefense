@@ -49,7 +49,6 @@ export class PlayerCar extends Component {
   private _burstTimer: number = 0;
 
   // 控制
-  private static readonly TOUCH_SENSITIVITY: number = 0.6; // 手指速度 → 坦克速度的倍率
   private static readonly TOUCH_STOP_THRESHOLD: number = 0.08; // 手指停止判定阈值（秒），80ms 无新触摸事件即认为停止
   private _dragging: boolean = false;
   private _lastTouchX: number = 0;
@@ -657,7 +656,7 @@ export class PlayerCar extends Component {
     if (dt > 0.001) {
       // 根据手指实时速度计算坦克速度（所有移动都参与计算，停止判定由时间阈值统一处理）
       const fingerSpeed = moveDelta / dt; // 世界坐标/秒
-      this._touchSpeed = fingerSpeed * PlayerCar.TOUCH_SENSITIVITY;
+      this._touchSpeed = fingerSpeed * (GameConfig.car.touchSensitivity ?? 1);
     }
 
     this._lastTouchX = x;

@@ -3,7 +3,7 @@
  * 展示长期资源、永久升级项，并提供升级与返回入口
  */
 
-import { _decorator, Button, Color, Component, Label, Node, Sprite } from 'cc';
+import { _decorator, Button, Color, Component, Label, Node, Sprite, tween, Tween, UIOpacity, Vec3 } from 'cc';
 import { PermanentUpgradeConfig, PermanentUpgradeId } from '../data/GameConfig';
 import { ProgressManager } from '../managers/ProgressManager';
 
@@ -27,6 +27,9 @@ type UpgradeRowRefs = {
 
 @ccclass('GarageScreen')
 export class GarageScreen extends Component {
+  private static readonly SHOW_DURATION = 0.42;
+  private static readonly HIDE_DURATION = 0.2;
+
   @property(Label)
   coinsLabel: Label | null = null;
 
@@ -39,6 +42,8 @@ export class GarageScreen extends Component {
   private _onBack: (() => void) | null = null;
   private _onUpgrade: ((id: PermanentUpgradeId) => boolean) | null = null;
   private _rows: UpgradeRowRefs[] = [];
+  private _bgNode: Node | null = null;
+  private _panelNode: Node | null = null;
 
   start(): void {
     this._cacheRows();
@@ -51,6 +56,100 @@ export class GarageScreen extends Component {
 
   setOnUpgrade(callback: (id: PermanentUpgradeId) => boolean): void {
     this._onUpgrade = callback;
+  }
+
+  show(animated: boolean = true): void {
+    this._ensureLayoutRefs();
+    if (!animated || !this._panelNode) {
+      this.node.active = true;
+      this._restoreShownState();
+      return;
+    }
+
+    this.node.active = true;
+    this._resetBg();
+    this._resetPanel();
+    const contentNodes = this._getAnimatedNodes();
+    contentNodes.forEach((node, index) => this._resetContent(node, index));
+
+    if (this._bgNode) {
+      const bgOpacity = this._ensureOpacity(this._bgNode);
+      Tween.stopAllByTarget(bgOpacity);
+      tween(bgOpacity)
+        .to(GarageScreen.SHOW_DURATION * 0.62, { opacity: 255 }, { easing: 'quadOut' })
+        .start();
+    }
+
+    const panelOpacity = this._ensureOpacity(this._panelNode);
+    Tween.stopAllByTarget(panelOpacity);
+    tween(panelOpacity)
+      .to(GarageScreen.SHOW_DURATION * 0.72, { opacity: 255 }, { easing: 'quadOut' })
+      .start();
+
+    const panelTarget = this._getBasePosition(this._panelNode);
+    Tween.stopAllByTarget(this._panelNode);
+    tween(this._panelNode)
+      .to(GarageScreen.SHOW_DURATION * 0.56, {
+        position: panelTarget,
+        scale: new Vec3(1.03, 1.03, 1),
+      }, { easing: 'backOut' })
+      .to(GarageScreen.SHOW_DURATION * 0.2, {
+        scale: new Vec3(1, 1, 1),
+      }, { easing: 'quadOut' })
+      .start();
+
+    contentNodes.forEach((node, index) => {
+      const opacity = this._ensureOpacity(node);
+      const targetPosition = this._getBasePosition(node);
+      const delay = 0.05 + index * 0.024;
+      Tween.stopAllByTarget(opacity);
+      Tween.stopAllByTarget(node);
+      tween(opacity)
+        .delay(delay)
+        .to(0.18, { opacity: 255 }, { easing: 'quadOut' })
+        .start();
+      tween(node)
+        .delay(delay)
+        .to(0.2, { position: targetPosition }, { easing: 'backOut' })
+        .start();
+    });
+  }
+
+  hide(animated: boolean = false, onDone?: () => void): void {
+    this._ensureLayoutRefs();
+    if (!animated || !this._panelNode) {
+      this.node.active = false;
+      onDone?.();
+      return;
+    }
+
+    if (this._bgNode) {
+      const bgOpacity = this._ensureOpacity(this._bgNode);
+      Tween.stopAllByTarget(bgOpacity);
+      tween(bgOpacity)
+        .to(GarageScreen.HIDE_DURATION, { opacity: 0 }, { easing: 'quadIn' })
+        .start();
+    }
+
+    const panelOpacity = this._ensureOpacity(this._panelNode);
+    Tween.stopAllByTarget(panelOpacity);
+    tween(panelOpacity)
+      .to(GarageScreen.HIDE_DURATION * 0.9, { opacity: 0 }, { easing: 'quadIn' })
+      .start();
+
+    Tween.stopAllByTarget(this._panelNode);
+    tween(this._panelNode)
+      .to(GarageScreen.HIDE_DURATION, {
+        position: this._getBasePosition(this._panelNode).clone().add3f(0, -24, 0),
+        scale: new Vec3(0.97, 0.97, 1),
+      }, { easing: 'quadIn' })
+      .start();
+
+    this.scheduleOnce(() => {
+      this.node.active = false;
+      this._restoreShownState();
+      onDone?.();
+    }, GarageScreen.HIDE_DURATION);
   }
 
   refresh(): void {
@@ -195,5 +294,85 @@ export class GarageScreen extends Component {
     return currency === 'coins'
       ? new Color(255, 220, 138, 255)
       : new Color(154, 224, 255, 255);
+  }
+
+  private _ensureLayoutRefs(): void {
+    this._bgNode = this._bgNode || this.node.getChildByName('Bg') || null;
+    this._panelNode = this._panelNode || this.node.getChildByName('Panel') || null;
+  }
+
+  private _getAnimatedNodes(): Node[] {
+    const nodes: Node[] = [];
+    if (this._panelNode) {
+      const title = this._panelNode.getChildByName('TitleLabel');
+      const topBar = this._panelNode.getChildByName('TopBar');
+      const summary = this._panelNode.getChildByName('SummaryLabel');
+      const hint = this._panelNode.getChildByName('HintLabel');
+      const backBtn = this._panelNode.getChildByName('BackBtn');
+      [title, topBar, summary, hint].forEach(node => {
+        if (node?.isValid) nodes.push(node);
+      });
+      this._rows.forEach(row => {
+        if (row.buttonNode?.parent?.isValid && nodes.indexOf(row.buttonNode.parent) < 0) {
+          nodes.push(row.buttonNode.parent);
+        }
+      });
+      if (backBtn?.isValid) nodes.push(backBtn);
+    }
+    return nodes;
+  }
+
+  private _resetBg(): void {
+    if (!this._bgNode) return;
+    const opacity = this._ensureOpacity(this._bgNode);
+    Tween.stopAllByTarget(opacity);
+    opacity.opacity = 0;
+  }
+
+  private _resetPanel(): void {
+    if (!this._panelNode) return;
+    const opacity = this._ensureOpacity(this._panelNode);
+    const basePosition = this._getBasePosition(this._panelNode);
+    Tween.stopAllByTarget(this._panelNode);
+    Tween.stopAllByTarget(opacity);
+    this._panelNode.setPosition(basePosition.clone().add3f(0, 36, 0));
+    this._panelNode.setScale(0.96, 0.96, 1);
+    opacity.opacity = 0;
+  }
+
+  private _resetContent(node: Node, index: number): void {
+    const opacity = this._ensureOpacity(node);
+    const basePosition = this._getBasePosition(node);
+    Tween.stopAllByTarget(node);
+    Tween.stopAllByTarget(opacity);
+    node.setPosition(basePosition.clone().add3f(0, 14 + Math.min(index, 8) * 3, 0));
+    opacity.opacity = 0;
+  }
+
+  private _restoreShownState(): void {
+    if (this._bgNode?.isValid) {
+      this._ensureOpacity(this._bgNode).opacity = 255;
+    }
+    if (this._panelNode?.isValid) {
+      this._panelNode.setPosition(this._getBasePosition(this._panelNode));
+      this._panelNode.setScale(1, 1, 1);
+      this._ensureOpacity(this._panelNode).opacity = 255;
+    }
+    this._getAnimatedNodes().forEach((node) => {
+      node.setPosition(this._getBasePosition(node));
+      this._ensureOpacity(node).opacity = 255;
+    });
+  }
+
+  private _getBasePosition(node: Node): Vec3 {
+    const carrier = node as Node & { __popupBasePosition?: Vec3 };
+    if (!carrier.__popupBasePosition) {
+      carrier.__popupBasePosition = node.getPosition().clone();
+    }
+    return carrier.__popupBasePosition.clone();
+  }
+
+  private _ensureOpacity(node: Node): UIOpacity {
+    return node.getComponent(UIOpacity) || node.addComponent(UIOpacity);
   }
 }
