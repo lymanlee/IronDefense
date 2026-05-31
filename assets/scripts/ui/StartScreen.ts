@@ -3,7 +3,7 @@
  * 显示标题、开始按钮、调试模式入口
  */
 
-import { _decorator, Component, Node, Label, Button, tween, Tween, UIOpacity, Vec3 } from 'cc';
+import { _decorator, Component, Node, Label, Button, tween, Tween, UIOpacity, Vec3, Graphics, UITransform, Mask, Color } from 'cc';
 
 const { ccclass, property } = _decorator;
 
@@ -144,6 +144,11 @@ export class StartScreen extends Component {
     if (this.garageNotifyNode) {
       this.garageNotifyNode.active = visible;
     }
+    if (visible) {
+      this._startGarageNotifyPulse();
+    } else {
+      this._stopGarageNotifyPulse();
+    }
   }
 
   show(animated: boolean = true): void {
@@ -151,6 +156,7 @@ export class StartScreen extends Component {
     if (!animated) {
       this.node.active = true;
       this._restoreShownState();
+      this._refreshGarageNotifyPulse();
       return;
     }
 
@@ -193,6 +199,8 @@ export class StartScreen extends Component {
   hide(animated: boolean = false, onDone?: () => void): void {
     this._ensureLayoutRefs();
     if (!animated) {
+      this._stopGarageNotifyPulse();
+      this._restoreShownState();
       this.node.active = false;
       onDone?.();
       return;
@@ -225,6 +233,7 @@ export class StartScreen extends Component {
     this.scheduleOnce(() => {
       this.node.active = false;
       this._restoreShownState();
+      this._stopGarageNotifyPulse();
       onDone?.();
     }, StartScreen.HIDE_DURATION);
   }
@@ -318,6 +327,136 @@ export class StartScreen extends Component {
       group.setScale(1, 1, 1);
       this._ensureOpacity(group).opacity = 255;
     });
+    this._refreshGarageNotifyPulse();
+  }
+
+  private _refreshGarageNotifyPulse(): void {
+    this._ensureGarageRefs();
+    if (this.garageNotifyNode?.active) {
+      this._startGarageNotifyPulse();
+    } else {
+      this._stopGarageNotifyPulse();
+    }
+  }
+
+  private _startGarageNotifyPulse(): void {
+    this._ensureGarageRefs();
+    if (!this.garageNotifyNode?.isValid || !this.garageNotifyNode.active) return;
+
+    const dotNode = this.garageNotifyNode as Node & {
+      __notifyPulseActive?: boolean;
+      __notifyShineNode?: Node | null;
+      __notifyShineMaskNode?: Node | null;
+      __notifyShineDriver?: { t: number } | null;
+    };
+    dotNode.__notifyPulseActive = true;
+
+    const shineNode = this._ensureGarageNotifyShineNode(dotNode);
+    const shineOpacity = shineNode ? this._ensureOpacity(shineNode) : null;
+    dotNode.__notifyShineDriver = dotNode.__notifyShineDriver || { t: 0 };
+    const driver = dotNode.__notifyShineDriver;
+
+    if (!shineNode || !shineOpacity || !driver) return;
+
+    Tween.stopAllByTarget(driver);
+    Tween.stopAllByTarget(shineNode);
+    Tween.stopAllByTarget(shineOpacity);
+    driver.t = 0;
+    this._applyGarageNotifyShineFrame(dotNode, driver.t);
+
+    tween(driver)
+      .delay(0.18)
+      .to(0.34, { t: 1 }, {
+        easing: 'quadOut',
+        onUpdate: () => {
+          this._applyGarageNotifyShineFrame(dotNode, driver.t);
+        },
+      })
+      .delay(1.05)
+      .call(() => {
+        driver.t = 0;
+        this._applyGarageNotifyShineFrame(dotNode, driver.t);
+      })
+      .union()
+      .repeatForever()
+      .start();
+  }
+
+  private _stopGarageNotifyPulse(): void {
+    this._ensureGarageRefs();
+    if (!this.garageNotifyNode?.isValid) return;
+
+    const dotNode = this.garageNotifyNode as Node & {
+      __notifyPulseActive?: boolean;
+      __notifyShineNode?: Node | null;
+      __notifyShineDriver?: { t: number } | null;
+    };
+    dotNode.__notifyPulseActive = false;
+    const driver = dotNode.__notifyShineDriver;
+    if (driver) {
+      Tween.stopAllByTarget(driver);
+      driver.t = 0;
+    }
+    this._applyGarageNotifyShineFrame(dotNode, 0);
+  }
+
+  private _applyGarageNotifyShineFrame(
+    dotNode: Node & { __notifyShineNode?: Node | null },
+    t: number,
+  ): void {
+    const shineNode = dotNode.__notifyShineNode;
+    if (!shineNode?.isValid) return;
+
+    const shineOpacity = this._ensureOpacity(shineNode);
+    const x = -16 + 32 * t;
+    const y = 8 - 16 * t;
+    shineNode.setPosition(x, y, 0);
+
+    // Bell-shaped alpha: stronger in the middle, fully transparent at both ends.
+    const alpha = Math.max(0, Math.sin(t * Math.PI));
+    shineOpacity.opacity = Math.round(alpha * 210);
+  }
+
+  private _ensureGarageNotifyShineNode(dotNode: Node & { __notifyShineNode?: Node | null; __notifyShineMaskNode?: Node | null }): Node | null {
+    if (dotNode.__notifyShineNode?.isValid) {
+      return dotNode.__notifyShineNode;
+    }
+
+    const maskNode = new Node('NotifyShineMask');
+    const maskTransform = maskNode.addComponent(UITransform);
+    maskTransform.setContentSize(20, 20);
+    const mask = maskNode.addComponent(Mask);
+    mask.type = Mask.Type.GRAPHICS_ELLIPSE;
+    maskNode.setPosition(0, 0, 0);
+    dotNode.addChild(maskNode);
+
+    const shineNode = new Node('NotifyShine');
+    const transform = shineNode.addComponent(UITransform);
+    transform.setContentSize(18, 28);
+    const graphics = shineNode.addComponent(Graphics);
+    const opacity = shineNode.addComponent(UIOpacity);
+    opacity.opacity = 0;
+
+    // Draw a slanted white gradient band: bright center with softer transparent edges.
+    graphics.fillColor = new Color(255, 255, 255, 36);
+    graphics.rect(-7, -14, 4, 28);
+    graphics.fill();
+    graphics.fillColor = new Color(255, 255, 255, 108);
+    graphics.rect(-3, -14, 4, 28);
+    graphics.fill();
+    graphics.fillColor = new Color(255, 255, 255, 198);
+    graphics.rect(1, -14, 3, 28);
+    graphics.fill();
+    graphics.fillColor = new Color(255, 255, 255, 72);
+    graphics.rect(4, -14, 3, 28);
+    graphics.fill();
+
+    shineNode.angle = -28;
+    shineNode.setPosition(-16, 8, 0);
+    maskNode.addChild(shineNode);
+    dotNode.__notifyShineMaskNode = maskNode;
+    dotNode.__notifyShineNode = shineNode;
+    return shineNode;
   }
 
   private _getBasePosition(node: Node): Vec3 {

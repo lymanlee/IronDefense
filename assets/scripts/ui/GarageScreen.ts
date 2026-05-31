@@ -17,12 +17,14 @@ const UPGRADE_COST_DISABLED_COLOR = new Color(133, 150, 166, 255);
 
 type UpgradeRowRefs = {
   id: PermanentUpgradeId;
+  rootNode: Node | null;
   levelLabel: Label | null;
   descLabel: Label | null;
   valueLabel: Label | null;
   costLabel: Label | null;
   buttonNode: Node | null;
   buttonLabel: Label | null;
+  enabled: boolean;
 };
 
 @ccclass('GarageScreen')
@@ -63,6 +65,7 @@ export class GarageScreen extends Component {
     if (!animated || !this._panelNode) {
       this.node.active = true;
       this._restoreShownState();
+      this._refreshAvailableRowPulses();
       return;
     }
 
@@ -113,11 +116,20 @@ export class GarageScreen extends Component {
         .to(0.2, { position: targetPosition }, { easing: 'backOut' })
         .start();
     });
+
+    this._rows
+      .filter(row => row.enabled && row.rootNode?.isValid)
+      .forEach((row, index) => {
+        this._playAvailableRowHighlight(row, 0.24 + index * 0.06);
+        this._startAvailableRowPulse(row, 0.82 + index * 0.06);
+      });
   }
 
   hide(animated: boolean = false, onDone?: () => void): void {
     this._ensureLayoutRefs();
     if (!animated || !this._panelNode) {
+      this._rows.forEach(row => this._stopAvailableRowPulse(row));
+      this._restoreShownState();
       this.node.active = false;
       onDone?.();
       return;
@@ -144,6 +156,8 @@ export class GarageScreen extends Component {
         scale: new Vec3(0.97, 0.97, 1),
       }, { easing: 'quadIn' })
       .start();
+
+    this._rows.forEach(row => this._stopAvailableRowPulse(row));
 
     this.scheduleOnce(() => {
       this.node.active = false;
@@ -201,6 +215,7 @@ export class GarageScreen extends Component {
       if (row.buttonLabel) {
         row.buttonLabel.string = state.isMaxLevel ? '满级' : enabled ? '升级' : '不足';
       }
+      row.enabled = enabled;
       this._applyUpgradeButtonState(row, enabled);
     });
   }
@@ -244,12 +259,14 @@ export class GarageScreen extends Component {
     const root = this.node.getChildByName('Panel')?.getChildByName(nodeName);
     return {
       id,
+      rootNode: root || null,
       levelLabel: root?.getChildByName('TitleLabel')?.getComponent(Label) || null,
       descLabel: root?.getChildByName('DescLabel')?.getComponent(Label) || null,
       valueLabel: root?.getChildByName('ValueLabel')?.getComponent(Label) || null,
       costLabel: root?.getChildByName('CostLabel')?.getComponent(Label) || null,
       buttonNode: root?.getChildByName('UpgradeBtn') || null,
       buttonLabel: root?.getChildByName('UpgradeBtn')?.getChildByName('Label')?.getComponent(Label) || null,
+      enabled: false,
     };
   }
 
@@ -272,6 +289,12 @@ export class GarageScreen extends Component {
       row.buttonLabel.color = enabled
         ? UPGRADE_BUTTON_LABEL_ENABLED_COLOR
         : UPGRADE_BUTTON_LABEL_DISABLED_COLOR;
+    }
+
+    if (!enabled) {
+      this._stopAvailableRowPulse(row);
+    } else if (this.node.active) {
+      this._startAvailableRowPulse(row);
     }
   }
 
@@ -313,8 +336,8 @@ export class GarageScreen extends Component {
         if (node?.isValid) nodes.push(node);
       });
       this._rows.forEach(row => {
-        if (row.buttonNode?.parent?.isValid && nodes.indexOf(row.buttonNode.parent) < 0) {
-          nodes.push(row.buttonNode.parent);
+        if (row.rootNode?.isValid && nodes.indexOf(row.rootNode) < 0) {
+          nodes.push(row.rootNode);
         }
       });
       if (backBtn?.isValid) nodes.push(backBtn);
@@ -360,8 +383,174 @@ export class GarageScreen extends Component {
     }
     this._getAnimatedNodes().forEach((node) => {
       node.setPosition(this._getBasePosition(node));
+      node.setScale(1, 1, 1);
       this._ensureOpacity(node).opacity = 255;
     });
+  }
+
+  private _refreshAvailableRowPulses(): void {
+    this._rows.forEach((row) => {
+      if (row.enabled) {
+        this._startAvailableRowPulse(row);
+      } else {
+        this._stopAvailableRowPulse(row);
+      }
+    });
+  }
+
+  private _playAvailableRowHighlight(row: UpgradeRowRefs, delay: number): void {
+    if (!row.rootNode?.isValid || !row.buttonNode?.isValid) return;
+
+    const rowNode = row.rootNode;
+    const buttonNode = row.buttonNode;
+    const rowSprite = rowNode.getComponent(Sprite);
+    const rowBaseColor = rowSprite?.color.clone() || null;
+    const rowBrightColor = rowBaseColor
+      ? new Color(
+          Math.min(255, rowBaseColor.r + 20),
+          Math.min(255, rowBaseColor.g + 26),
+          Math.min(255, rowBaseColor.b + 18),
+          rowBaseColor.a
+        )
+      : null;
+    const buttonBaseScale = buttonNode.getScale().clone();
+    const buttonBaseColor = buttonNode.getComponent(Sprite)?.color.clone() || null;
+    const buttonBrightColor = buttonBaseColor
+      ? new Color(255, 248, 220, buttonBaseColor.a)
+      : null;
+    const glowProxy = { t: 0 };
+
+    Tween.stopAllByTarget(glowProxy);
+    tween(glowProxy)
+      .delay(delay)
+      .to(0.18, { t: 1 }, {
+        easing: 'quadOut',
+        onUpdate: () => {
+          if (!rowSprite || !rowBaseColor || !rowBrightColor) return;
+          rowSprite.color = Color.lerp(new Color(), rowBaseColor, rowBrightColor, glowProxy.t);
+          const buttonSprite = buttonNode.getComponent(Sprite);
+          if (buttonSprite && buttonBaseColor && buttonBrightColor) {
+            buttonSprite.color = Color.lerp(new Color(), buttonBaseColor, buttonBrightColor, glowProxy.t);
+          }
+        },
+      })
+      .to(0.28, { t: 0 }, {
+        easing: 'quadInOut',
+        onUpdate: () => {
+          if (!rowSprite || !rowBaseColor || !rowBrightColor) return;
+          rowSprite.color = Color.lerp(new Color(), rowBaseColor, rowBrightColor, glowProxy.t);
+          const buttonSprite = buttonNode.getComponent(Sprite);
+          if (buttonSprite && buttonBaseColor && buttonBrightColor) {
+            buttonSprite.color = Color.lerp(new Color(), buttonBaseColor, buttonBrightColor, glowProxy.t);
+          }
+        },
+      })
+      .call(() => {
+        if (rowSprite && rowBaseColor) {
+          rowSprite.color = rowBaseColor;
+        }
+        const buttonSprite = buttonNode.getComponent(Sprite);
+        if (buttonSprite && buttonBaseColor) {
+          buttonSprite.color = buttonBaseColor;
+        }
+      })
+      .start();
+
+    Tween.stopAllByTarget(buttonNode);
+    tween(buttonNode)
+      .delay(delay + 0.04)
+      .to(0.16, { scale: new Vec3(buttonBaseScale.x * 1.08, buttonBaseScale.y * 1.08, 1) }, { easing: 'backOut' })
+      .to(0.2, { scale: buttonBaseScale }, { easing: 'quadOut' })
+      .start();
+  }
+
+  private _startAvailableRowPulse(row: UpgradeRowRefs, delay: number = 0): void {
+    if (!row.enabled || !row.buttonNode?.isValid || !row.rootNode?.isValid) return;
+
+    const buttonNode = row.buttonNode as Node & { __garagePulseActive?: boolean };
+    if (buttonNode.__garagePulseActive) return;
+    buttonNode.__garagePulseActive = true;
+    buttonNode.setScale(1, 1, 1);
+
+    const rowNode = row.rootNode;
+    const rowSprite = rowNode.getComponent(Sprite);
+    const rowBaseColor = this._getRowBaseColor(rowNode);
+    const rowPulseColor = rowBaseColor
+      ? new Color(
+          Math.min(255, rowBaseColor.r + 18),
+          Math.min(255, rowBaseColor.g + 24),
+          Math.min(255, rowBaseColor.b + 18),
+          rowBaseColor.a
+        )
+      : null;
+    const rowCarrier = rowNode as Node & { __garageRowPulseProxy?: { t: number } };
+    rowCarrier.__garageRowPulseProxy = rowCarrier.__garageRowPulseProxy || { t: 0 };
+    rowCarrier.__garageRowPulseProxy.t = 0;
+
+    const pulse = tween(buttonNode)
+      .delay(delay)
+      .to(0.58, { scale: new Vec3(1.06, 1.06, 1) }, { easing: 'sineInOut' })
+      .to(0.58, { scale: new Vec3(1, 1, 1) }, { easing: 'sineInOut' })
+      .delay(0.5)
+      .union()
+      .repeatForever();
+
+    pulse.start();
+
+    if (rowSprite && rowBaseColor && rowPulseColor) {
+      Tween.stopAllByTarget(rowCarrier.__garageRowPulseProxy);
+      tween(rowCarrier.__garageRowPulseProxy)
+        .delay(delay)
+        .to(0.58, { t: 1 }, {
+          easing: 'sineInOut',
+          onUpdate: () => {
+            rowSprite.color = Color.lerp(new Color(), rowBaseColor, rowPulseColor, rowCarrier.__garageRowPulseProxy!.t);
+          },
+        })
+        .to(0.58, { t: 0 }, {
+          easing: 'sineInOut',
+          onUpdate: () => {
+            rowSprite.color = Color.lerp(new Color(), rowBaseColor, rowPulseColor, rowCarrier.__garageRowPulseProxy!.t);
+          },
+        })
+        .delay(0.5)
+        .union()
+        .repeatForever()
+        .start();
+    }
+  }
+
+  private _stopAvailableRowPulse(row: UpgradeRowRefs): void {
+    if (!row.buttonNode?.isValid) return;
+    const buttonNode = row.buttonNode as Node & { __garagePulseActive?: boolean };
+    buttonNode.__garagePulseActive = false;
+    Tween.stopAllByTarget(buttonNode);
+    buttonNode.setScale(1, 1, 1);
+
+    if (row.rootNode?.isValid) {
+      const rowSprite = row.rootNode.getComponent(Sprite);
+      const rowCarrier = row.rootNode as Node & { __garageRowPulseProxy?: { t: number } };
+      if (rowCarrier.__garageRowPulseProxy) {
+        Tween.stopAllByTarget(rowCarrier.__garageRowPulseProxy);
+        rowCarrier.__garageRowPulseProxy.t = 0;
+      }
+      if (rowSprite) {
+        const baseColor = this._getRowBaseColor(row.rootNode);
+        if (baseColor) {
+          rowSprite.color = baseColor;
+        }
+      }
+    }
+  }
+
+  private _getRowBaseColor(node: Node): Color | null {
+    const carrier = node as Node & { __garageBaseColor?: Color };
+    if (!carrier.__garageBaseColor) {
+      const sprite = node.getComponent(Sprite);
+      if (!sprite) return null;
+      carrier.__garageBaseColor = sprite.color.clone();
+    }
+    return carrier.__garageBaseColor.clone();
   }
 
   private _getBasePosition(node: Node): Vec3 {
