@@ -1,0 +1,6 @@
+{
+  "__version__": "1.0.1",
+  "general": {
+    "start_scene": "db://assets/scenes/MainScene.scene"
+  }
+}

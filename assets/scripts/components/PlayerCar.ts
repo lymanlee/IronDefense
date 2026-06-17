@@ -3,10 +3,11 @@
  * 控制武装车的移动、射击和基础武器档位表现
  */
 
-import { _decorator, Component, Node, Sprite, SpriteFrame, resources, UITransform, tween, Vec3, UIOpacity } from 'cc';
+import { _decorator, Component, Node, Sprite, SpriteFrame, UITransform, tween, Vec3, UIOpacity } from 'cc';
 import { GameConfig } from '../data/GameConfig';
 import { WeaponTierSystem } from './WeaponTierSystem';
 import { Enemy } from './Enemy';
+import { BundleLoader } from '../managers/BundleLoader';
 
 const { ccclass, property } = _decorator;
 
@@ -49,11 +50,8 @@ export class PlayerCar extends Component {
   private _burstTimer: number = 0;
 
   // 控制
-  private static readonly TOUCH_STOP_THRESHOLD: number = 0.08; // 手指停止判定阈值（秒），80ms 无新触摸事件即认为停止
   private _dragging: boolean = false;
   private _lastTouchX: number = 0;
-  private _lastTouchMoveTime: number = 0; // Date.now() 毫秒时间戳
-  private _touchSpeed: number = 0;        // 手指实时速度（世界坐标/秒），由 onTouchMove 计算，update 消费
   private _keyLeft: boolean = false;
   private _keyRight: boolean = false;
 
@@ -116,7 +114,7 @@ export class PlayerCar extends Component {
    * 加载序列帧图片（resources/car_frames_v3/car_0~1.png）
    */
   private _loadFrames(): void {
-    resources.loadDir('car_frames_v3', SpriteFrame, (err, assets) => {
+    BundleLoader.loadDir('battle', 'car_frames_v3', SpriteFrame, (err, assets) => {
       if (err) {
         console.error('[PlayerCar] 加载 car_frames_v3 失败:', err);
         return;
@@ -144,7 +142,7 @@ export class PlayerCar extends Component {
   }
 
   private _loadFxFrames(): void {
-    resources.loadDir('car_fx/muzzle_v2', SpriteFrame, (err, assets) => {
+    BundleLoader.loadDir('battle', 'car_fx/muzzle_v2', SpriteFrame, (err, assets) => {
       if (err) {
         console.error('[PlayerCar] 加载 muzzle_v2 frames 失败:', err);
         return;
@@ -157,7 +155,7 @@ export class PlayerCar extends Component {
       }
     });
 
-    resources.loadDir('car_fx/thruster', SpriteFrame, (err, assets) => {
+    BundleLoader.loadDir('battle', 'car_fx/thruster', SpriteFrame, (err, assets) => {
       if (err) {
         console.error('[PlayerCar] 加载 thruster frames 失败:', err);
         return;
@@ -245,16 +243,6 @@ export class PlayerCar extends Component {
     // 键盘移动
     if (this._keyLeft) this._x -= GameConfig.car.speed * dt;
     if (this._keyRight) this._x += GameConfig.car.speed * dt;
-
-    // 触屏移动：按手指实时速度驱动，手指停止后立即停
-    if (this._dragging) {
-      const timeSinceLastMove = (Date.now() - this._lastTouchMoveTime) / 1000;
-      if (timeSinceLastMove < PlayerCar.TOUCH_STOP_THRESHOLD) {
-        this._x += this._touchSpeed * dt;
-      } else {
-        this._touchSpeed = 0;
-      }
-    }
 
     // 限制范围
     this._x = Math.max(left + movePadding, Math.min(right - movePadding, this._x));
@@ -639,35 +627,22 @@ export class PlayerCar extends Component {
     this._fireTimer = 0;
   }
 
-  // 触控输入：速度模式，手指滑动速度决定坦克速度，手指停则立即停
+  // 触控输入：位移模式，touchSensitivity=1 时战车横向位移等于手指横向位移
   onTouchStart(x: number): void {
     this._dragging = true;
     this._lastTouchX = x;
-    this._lastTouchMoveTime = Date.now();
-    this._touchSpeed = 0;
   }
 
   onTouchMove(x: number): void {
     if (!this._dragging) return;
-    const now = Date.now();
-    const dt = (now - this._lastTouchMoveTime) / 1000; // 转秒
     const moveDelta = x - this._lastTouchX;
-
-    if (dt > 0.001) {
-      // 根据手指实时速度计算坦克速度（所有移动都参与计算，停止判定由时间阈值统一处理）
-      const fingerSpeed = moveDelta / dt; // 世界坐标/秒
-      this._touchSpeed = fingerSpeed * (GameConfig.car.touchSensitivity ?? 1);
-    }
-
+    this._x += moveDelta * (GameConfig.car.touchSensitivity ?? 1);
     this._lastTouchX = x;
-    this._lastTouchMoveTime = now;
   }
 
   onTouchEnd(): void {
     this._dragging = false;
-    this._touchSpeed = 0;
     this._lastTouchX = 0;
-    this._lastTouchMoveTime = 0;
   }
 
   // 键盘输入
@@ -710,8 +685,6 @@ export class PlayerCar extends Component {
     this._burstVisualStage = 0;
     this._dragging = false;
     this._lastTouchX = 0;
-    this._lastTouchMoveTime = 0;
-    this._touchSpeed = 0;
     this._keyLeft = false;
     this._keyRight = false;
     this._isFireAnim = false;

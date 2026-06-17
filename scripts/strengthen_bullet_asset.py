@@ -4,7 +4,7 @@ from PIL import Image, ImageChops, ImageEnhance, ImageFilter
 
 
 ROOT = Path(__file__).resolve().parent.parent
-SOURCE = ROOT / "assets/textures/bullet_white.png"
+SOURCE = ROOT / "assets/bundles/battle/textures/bullet_white.png"
 PREVIEW = ROOT / "output/imagegen/bullet-upgrade/bullet-energy-white-v1-strong.png"
 
 

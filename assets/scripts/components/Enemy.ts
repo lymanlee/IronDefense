@@ -3,13 +3,16 @@
  * 控制敌人的移动、AI漫游、攻击和帧动画渲染
  */
 
-import { _decorator, Component, Sprite, UIOpacity, Color, SpriteFrame, resources, Node, UITransform, Vec3 } from 'cc';
+import { _decorator, Component, Sprite, UIOpacity, Color, SpriteFrame, Node, UITransform, Vec3 } from 'cc';
 import { GameConfig, WaveData, EnemyTypeId, EnemyTypeData } from '../data/GameConfig';
+import { BundleLoader } from '../managers/BundleLoader';
 
 const { ccclass, property } = _decorator;
 
 @ccclass('Enemy')
 export class Enemy extends Component {
+  private static _nextSpawnToken: number = 1;
+
   // ==================== 波次颜色映射 ====================
   // 注意：颜色会被 Sprite.color 乘法调制，太浅的颜色闪白不明显
   // 调低基础亮度以便闪白效果清晰可见
@@ -47,6 +50,7 @@ export class Enemy extends Component {
   private _speedBoostTimer: number = 0;
   private _phaseTriggered: boolean = false;
   private _battleFrozen: boolean = false;
+  private _spawnToken: number = 0;
 
   // ==================== 位置 ====================
   private _x: number = 0;
@@ -127,7 +131,7 @@ export class Enemy extends Component {
   }
 
   private _loadFrames(): void {
-    resources.loadDir('sprites', SpriteFrame, (err, assets) => {
+    BundleLoader.loadDir('battle', 'sprites', SpriteFrame, (err, assets) => {
       if (err) {
         console.warn('[Enemy] 加载 sprites 失败:', err);
         return;
@@ -151,19 +155,19 @@ export class Enemy extends Component {
     const cfg = GameConfig.bridge;
     this._enemyType = enemyType;
     this._enemyTypeData = GameConfig.enemyTypes[enemyType] || GameConfig.enemyTypes.normal;
+    this._spawnToken = Enemy._nextSpawnToken++;
+    const spawnY = cfg.battleTop + 30;
 
     if (col !== undefined && row !== undefined && totalCols !== undefined && totalRows !== undefined) {
-      const verticalSpacing = 6;
       const horizontalJitter = 30;
-      const verticalJitter = 18;
       this._x = x! + (Math.random() - 0.5) * horizontalJitter * 2;
-      this._y = cfg.top + 30 + row * verticalSpacing + (Math.random() - 0.5) * verticalJitter * 2;
+      this._y = spawnY;
     } else {
       const laneCount = cfg.laneCount;
       this._lane = Math.floor(Math.random() * laneCount);
       const laneWidth = (cfg.right - cfg.left) / laneCount;
       this._x = cfg.left + (this._lane + 0.5) * laneWidth;
-      this._y = cfg.top + 30 + Math.random() * 40;
+      this._y = spawnY;
     }
 
     this._maxHp = Math.max(1, Math.round(waveData.hp * this._enemyTypeData.hpMult));
@@ -377,7 +381,7 @@ export class Enemy extends Component {
    */
   pushBack(distance: number): void {
     if (this._dead || distance <= 0) return;
-    this._y = Math.min(GameConfig.bridge.top + 120, this._y + distance);
+    this._y = Math.min(GameConfig.bridge.battleTop + 120, this._y + distance);
     this._reachedRail = false;
     this.node.setPosition(this._x, this._y, 0);
   }
@@ -464,6 +468,7 @@ export class Enemy extends Component {
   get healRange(): number { return this._enemyTypeData.healRange || 0; }
   get phaseTriggered(): boolean { return this._phaseTriggered; }
   get hpRatio(): number { return this._maxHp > 0 ? this._hp / this._maxHp : 0; }
+  get spawnToken(): number { return this._spawnToken; }
 
   markPhaseTriggered(): void {
     this._phaseTriggered = true;
@@ -477,6 +482,7 @@ export class Enemy extends Component {
 
   reset(): void {
     this._dead = true;
+    this._spawnToken = 0;
     this._reachedRail = false;
     this._freezeTimer = 0;
     this._spawnTimer = 0;

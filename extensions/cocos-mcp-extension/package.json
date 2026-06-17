@@ -1,0 +1,78 @@
+{
+  "name": "cocos-mcp-extension",
+  "version": "0.1.0",
+  "package_version": 2,
+  "description": "Embedded MCP server for Cocos Creator 3.8.8 with future entitlement seams.",
+  "author": "Codex",
+  "editor": ">=3.8.0",
+  "main": "./dist/main.js",
+  "dependencies": {
+    "@cocos-mcp/shared": "0.1.0"
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit"
+  },
+  "panels": {
+    "status": {
+      "title": "Cocos MCP Status",
+      "type": "dockable",
+      "main": "dist/panels/status/index",
+      "size": {
+        "min-width": 420,
+        "min-height": 460,
+        "width": 540,
+        "height": 560
+      }
+    }
+  },
+  "contributions": {
+    "menu": [
+      {
+        "path": "i18n:menu.extension/Cocos MCP",
+        "label": "Cocos MCP",
+        "message": "open-status-panel"
+      }
+    ],
+    "messages": {
+      "start-server": {
+        "methods": [
+          "startServer"
+        ]
+      },
+      "stop-server": {
+        "methods": [
+          "stopServer"
+        ]
+      },
+      "get-server-status": {
+        "methods": [
+          "getServerStatus"
+        ]
+      },
+      "open-status-panel": {
+        "methods": [
+          "openStatusPanel"
+        ]
+      }
+    },
+    "scene": {
+      "script": "./dist/scene.js",
+      "methods": [
+        "getSceneInfo",
+        "getSceneTreeData",
+        "getNodeDetails",
+        "getSceneRevision",
+        "resolveNodeComponentReference",
+        "createNode",
+        "updateNodeProperty",
+        "addComponent",
+        "updateComponentProperty",
+        "createPrefabAsset",
+        "moveNode",
+        "deleteNode",
+        "removeComponent"
+      ]
+    }
+  }
+}

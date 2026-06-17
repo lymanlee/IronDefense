@@ -11,11 +11,12 @@
  * 这是系统级行为，代码无法绕过，只能提示用户检查静音开关。
  */
 
-import { _decorator, Component, AudioSource, AudioClip, resources, error } from 'cc';
+import { _decorator, Component, AudioSource, AudioClip, error } from 'cc';
+import { BundleLoader } from './BundleLoader';
 
 const { ccclass, property } = _decorator;
 
-/** SFX 音效名称 → resources/audio/ 下的文件名 */
+/** SFX 音效名称 -> audio bundle 的 audio/ 下文件名 */
 const SFX_NAMES = ['shoot', 'explode', 'mass_explode', 'hit', 'levelup', 'alarm'];
 
 @ccclass('AudioManager')
@@ -46,6 +47,7 @@ export class AudioManager extends Component {
   }
 
   start(): void {
+    this._loadBGMClip();
     this._loadAllClips();
   }
 
@@ -62,7 +64,7 @@ export class AudioManager extends Component {
       return;
     }
     if (!this.bgmSource.clip) {
-      console.warn('[AudioManager] bgmSource.clip is null! 请在编辑器中绑定 BGM AudioClip。');
+      this._loadBGMClip(() => this.startBGM());
       return;
     }
     this.bgmSource.loop = true;
@@ -103,7 +105,7 @@ export class AudioManager extends Component {
 
   private _loadAllClips(): void {
     for (const name of SFX_NAMES) {
-      resources.load(`audio/${name}`, AudioClip, (err, clip) => {
+      BundleLoader.loadAsset('audio', `audio/${name}`, AudioClip, (err, clip) => {
         if (err) {
           error(`[AudioManager] 加载 audio/${name} 失败:`, err.message);
           return;
@@ -112,6 +114,21 @@ export class AudioManager extends Component {
         console.log(`[AudioManager] SFX loaded: ${name}`);
       });
     }
+  }
+
+  private _loadBGMClip(onLoaded?: () => void): void {
+    if (!this.bgmSource || this.bgmSource.clip) {
+      onLoaded?.();
+      return;
+    }
+    BundleLoader.loadAsset('audio', 'audio/bgm', AudioClip, (err, clip) => {
+      if (err || !clip) {
+        error('[AudioManager] 加载 audio/bgm 失败:', err?.message);
+        return;
+      }
+      this.bgmSource.clip = clip;
+      onLoaded?.();
+    });
   }
 
   private _playSFX(name: string, volume: number = 1, heavy: boolean = false): void {

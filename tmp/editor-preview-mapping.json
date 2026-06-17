@@ -1,0 +1,146 @@
+{
+  "assets/editor-preview/ui/start/start-bg-wasteland-v1-preview.png": {
+    "main": "7283e611-40ff-41ee-9ae6-2080fd1a5cd2",
+    "sprite": "7283e611-40ff-41ee-9ae6-2080fd1a5cd2@f9941"
+  },
+  "assets/editor-preview/ui/start/start-hero-banner-v1-preview.png": {
+    "main": "72cf5d0b-6881-4881-9aae-1a8980ec8945",
+    "sprite": "72cf5d0b-6881-4881-9aae-1a8980ec8945@f9941"
+  },
+  "assets/editor-preview/ui/start/start-stage-card-v1-preview.png": {
+    "main": "899b7a66-f7db-4fa8-839e-5cb499d2a949",
+    "sprite": "899b7a66-f7db-4fa8-839e-5cb499d2a949@f9941"
+  },
+  "assets/editor-preview/ui/start/start-action-dock-v1-preview.png": {
+    "main": "b1473e5b-eeb8-496d-a00b-504f439f90dd",
+    "sprite": "b1473e5b-eeb8-496d-a00b-504f439f90dd@f9941"
+  },
+  "assets/editor-preview/ui/start/start-utility-dock-v1-preview.png": {
+    "main": "94f5ca31-16b1-4e19-97c1-4fdf97ff68bf",
+    "sprite": "94f5ca31-16b1-4e19-97c1-4fdf97ff68bf@f9941"
+  },
+  "assets/editor-preview/ui/game/battle-bg-road-supply-lane-v3-preview.png": {
+    "main": "de219a3d-7e0c-49c1-a2f7-f5a59a7071bd",
+    "sprite": "de219a3d-7e0c-49c1-a2f7-f5a59a7071bd@f9941"
+  },
+  "assets/editor-preview/ui/common/supply-card-portrait-v2-preview.png": {
+    "main": "9e12dd93-a920-431d-96a1-ecbedc61b2e9",
+    "sprite": "9e12dd93-a920-431d-96a1-ecbedc61b2e9@f9941"
+  },
+  "assets/editor-preview/ui/common/supply-ad-button-wide-v2-preview.png": {
+    "main": "3e4c7075-a832-41da-80c1-41f60c9c3943",
+    "sprite": "3e4c7075-a832-41da-80c1-41f60c9c3943@f9941"
+  },
+  "assets/editor-preview/ui/panels/supply-panel-frame-v1-preview.png": {
+    "main": "3fa45d29-62f0-44f6-a956-fa65dd809ec8",
+    "sprite": "3fa45d29-62f0-44f6-a956-fa65dd809ec8@f9941"
+  },
+  "assets/editor-preview/ui/panel_fill_v1-preview.png": {
+    "main": "bfba0b50-867d-403b-8e5a-96da2958f985",
+    "sprite": "bfba0b50-867d-403b-8e5a-96da2958f985@f9941"
+  },
+  "assets/editor-preview/battle/ui/game/battle-player-zone-v1-preview.png": {
+    "main": "2dc390fe-4373-45b6-a1f5-703eccb17d07",
+    "sprite": "2dc390fe-4373-45b6-a1f5-703eccb17d07@f9941"
+  },
+  "assets/editor-preview/battle/ui/game/battle-rail-fence-v1-preview.png": {
+    "main": "82a421e3-eba5-4a38-853e-6fbfe6aeca58",
+    "sprite": "82a421e3-eba5-4a38-853e-6fbfe6aeca58@f9941"
+  },
+  "assets/editor-preview/battle/car_frames_v3/car_0-preview.png": {
+    "main": "6d8789ba-db85-4621-a654-83493f3cd6af",
+    "sprite": "6d8789ba-db85-4621-a654-83493f3cd6af@f9941"
+  },
+  "assets/editor-preview/battle/car_fx/thruster/thruster_0-preview.png": {
+    "main": "50cbce00-c0b5-474e-8232-87670ddbea61",
+    "sprite": "50cbce00-c0b5-474e-8232-87670ddbea61@f9941"
+  },
+  "assets/editor-preview/battle/car_fx/muzzle_v2/muzzle_flash_0-preview.png": {
+    "main": "387121eb-3a2c-481a-a714-0896ada55713",
+    "sprite": "387121eb-3a2c-481a-a714-0896ada55713@f9941"
+  },
+  "assets/editor-preview/battle/ui/hud-panel-top-v2-preview.png": {
+    "main": "051591a1-c22c-4417-ba6b-81e92baecf86",
+    "sprite": "051591a1-c22c-4417-ba6b-81e92baecf86@f9941"
+  },
+  "assets/editor-preview/battle/ui/common/hud-bar-frame-v2-preview.png": {
+    "main": "f342d1a4-116f-48d2-afef-317c06451c06",
+    "sprite": "f342d1a4-116f-48d2-afef-317c06451c06@f9941"
+  },
+  "assets/editor-preview/battle/ui/common/hud-bar-fill-hp-v1-preview.png": {
+    "main": "f512ab10-9d65-427d-a7e9-bc6a5aa642fb",
+    "sprite": "f512ab10-9d65-427d-a7e9-bc6a5aa642fb@f9941"
+  },
+  "assets/editor-preview/battle/ui/common/hud-bar-fill-progress-v1-preview.png": {
+    "main": "0ac440b1-8ddd-42db-8229-9ef9b009f810",
+    "sprite": "0ac440b1-8ddd-42db-8229-9ef9b009f810@f9941"
+  },
+  "assets/editor-preview/battle/ui/common/icon-pause-white-256-preview.png": {
+    "main": "213947b3-d281-4665-aedb-fbbd0dc83db4",
+    "sprite": "213947b3-d281-4665-aedb-fbbd0dc83db4@f9941"
+  },
+  "assets/editor-preview/battle/ui/common/icon-play-white-256-preview.png": {
+    "main": "bc8c9b0a-cd2c-41d5-b186-aa57056aa785",
+    "sprite": "bc8c9b0a-cd2c-41d5-b186-aa57056aa785@f9941"
+  },
+  "assets/editor-preview/battle/ui/start/start-stage-card-v1-preview.png": {
+    "main": "3f9cefd5-6089-45ad-b89b-c4b682143ba9",
+    "sprite": "3f9cefd5-6089-45ad-b89b-c4b682143ba9@f9941"
+  },
+  "assets/editor-preview/battle/ui/common/btn-arrow-v1-preview.png": {
+    "main": "6f70df8f-f6ce-4361-8049-d86a453705d8",
+    "sprite": "6f70df8f-f6ce-4361-8049-d86a453705d8@f9941"
+  },
+  "assets/editor-preview/battle/ui/common/btn-primary-v1-preview.png": {
+    "main": "11cd08b8-c3aa-4d31-bbbc-9ac21cb49230",
+    "sprite": "11cd08b8-c3aa-4d31-bbbc-9ac21cb49230@f9941"
+  },
+  "assets/editor-preview/battle/ui/hud-panel-top-v1-preview.png": {
+    "main": "d74efd27-a72e-414e-96aa-e46980186d63",
+    "sprite": "d74efd27-a72e-414e-96aa-e46980186d63@f9941"
+  },
+  "assets/editor-preview/battle/ui/common/btn-secondary-v1-preview.png": {
+    "main": "1eaad068-40a0-4fee-8769-e9c957140786",
+    "sprite": "1eaad068-40a0-4fee-8769-e9c957140786@f9941"
+  },
+  "assets/editor-preview/battle/ui/panel_fill_v1-preview.png": {
+    "main": "86ff9f1a-2bef-4462-93d8-65cbfa5ce7a0",
+    "sprite": "86ff9f1a-2bef-4462-93d8-65cbfa5ce7a0@f9941"
+  },
+  "assets/editor-preview/battle/ui/supply-panel-frame-v1-preview.png": {
+    "main": "27692f1d-5173-4a70-9ce3-a74a614d8d36",
+    "sprite": "27692f1d-5173-4a70-9ce3-a74a614d8d36@f9941"
+  },
+  "assets/editor-preview/battle/ui/common/video-icon-transparent-256-preview.png": {
+    "main": "f567d4e9-b4de-456d-a07a-878505517771",
+    "sprite": "f567d4e9-b4de-456d-a07a-878505517771@f9941"
+  },
+  "assets/editor-preview/battle/ui/common/icons_reward_v2/icon_coin-preview.png": {
+    "main": "2d4651d4-ae87-4102-a63b-2be01ce9a15f",
+    "sprite": "2d4651d4-ae87-4102-a63b-2be01ce9a15f@f9941"
+  },
+  "assets/editor-preview/battle/ui/common/icons_reward_v2/icon_parts-preview.png": {
+    "main": "1ca44841-a735-4f30-9397-2fad88dd09d2",
+    "sprite": "1ca44841-a735-4f30-9397-2fad88dd09d2@f9941"
+  },
+  "assets/editor-preview/battle/ui/common/icon-hp-v1-preview.png": {
+    "main": "673dc79c-f5e9-4d85-88a0-9993e8b24915",
+    "sprite": "673dc79c-f5e9-4d85-88a0-9993e8b24915@f9941"
+  },
+  "assets/editor-preview/battle/ui/common/icon-weapon-v1-preview.png": {
+    "main": "afda2a8f-47d5-4610-aba8-91f0e9d7028c",
+    "sprite": "afda2a8f-47d5-4610-aba8-91f0e9d7028c@f9941"
+  },
+  "assets/editor-preview/battle/ui/common/icons_reward_v2/icon_energy_core-preview.png": {
+    "main": "de913915-94a6-4c09-9183-821a19fc214a",
+    "sprite": "de913915-94a6-4c09-9183-821a19fc214a@f9941"
+  },
+  "assets/editor-preview/battle/ui/common/icons_reward_v2/icon_supply_token-preview.png": {
+    "main": "32fe615b-1d69-41a9-9ae3-e9286e67b57c",
+    "sprite": "32fe615b-1d69-41a9-9ae3-e9286e67b57c@f9941"
+  },
+  "assets/editor-preview/battle/ui/common/icon-stage-v1-preview.png": {
+    "main": "63242113-7360-4631-ba8a-783427618be3",
+    "sprite": "63242113-7360-4631-ba8a-783427618be3@f9941"
+  }
+}

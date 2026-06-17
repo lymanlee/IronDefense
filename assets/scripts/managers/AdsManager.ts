@@ -1,6 +1,8 @@
 /**
- * AdsManager.ts - 广告占位与后续微信广告接入适配层
- * 当前默认使用 3 秒模拟观看，所有广告触点通过 placement 语义调用。
+ * AdsManager.ts - 广告管理（模拟 / 微信双模式）
+ * simulated 模式：本地 3 秒模拟观看，用于开发调试
+ * wechat 模式：调用 wx 广告 API，用于微信小游戏真机上线
+ * 所有广告触点通过 placement 语义调用，切换模式只需改 GameConfig.ads.provider
  */
 
 import { Node, director, UITransform, Label, Color, Graphics, BlockInputEvents } from 'cc';
@@ -29,6 +31,7 @@ export class AdsManager {
   private _root: Node | null = null;
   private _bannerNode: Node | null = null;
   private _ownsBannerNode: boolean = false;
+  private _wechatBannerAd: any | null = null;
   private _activeAdNode: Node | null = null;
   private _lastInterstitialAt: number = -Infinity;
   private _runStartedAt: number = 0;
@@ -77,7 +80,7 @@ export class AdsManager {
 
     const wxApi = (globalThis as any).wx;
     if (GameConfig.ads.provider === 'wechat' && wxApi && config.adUnitId) {
-      // 后续真机接入时在这里创建 wx.createBannerAd，并根据 safe area 调整位置。
+      this._showWechatBanner(config.adUnitId);
       return;
     }
 
@@ -118,6 +121,14 @@ export class AdsManager {
   }
 
   hideBanner(): void {
+    // 微信模式：destroy 原生 Banner 实例
+    if (this._wechatBannerAd) {
+      this._wechatBannerAd.destroy?.();
+      this._wechatBannerAd = null;
+      return;
+    }
+
+    // 模拟模式：移除或隐藏 Banner 节点
     if (this._bannerNode?.isValid) {
       if (this._ownsBannerNode) {
         this._bannerNode.destroy();
@@ -169,6 +180,62 @@ export class AdsManager {
       ad.onClose?.(done);
       ad.onError?.(fail);
       ad.show?.().catch(fail);
+    });
+  }
+
+  /** 微信小游戏 Banner 广告：创建并定位到屏幕底部居中 */
+  private _showWechatBanner(adUnitId: string): void {
+    const wxApi = (globalThis as any).wx;
+    if (!wxApi?.createBannerAd) return;
+
+    // 先销毁旧实例（每次 createBannerAd 都返回新实例，需避免泄漏）
+    if (this._wechatBannerAd) {
+      this._wechatBannerAd.destroy?.();
+      this._wechatBannerAd = null;
+    }
+
+    // 获取屏幕信息用于定位
+    const sysInfo = wxApi.getSystemInfoSync?.() || {};
+    const screenWidth: number = sysInfo.screenWidth || 720;
+    const screenHeight: number = sysInfo.screenHeight || 1280;
+    const safeArea: { bottom?: number } = sysInfo.safeArea || {};
+
+    // 创建 Banner 广告实例，初始宽度设为屏幕宽度
+    const bannerAd = wxApi.createBannerAd({
+      adUnitId,
+      style: {
+        left: 0,
+        top: screenHeight - 100,  // 临时位置，onResize 后修正
+        width: screenWidth,
+      },
+    });
+
+    // onResize：根据实际尺寸居中定位到屏幕底部
+    const onResize = (size: { width: number; height: number }) => {
+      if (!bannerAd) return;
+      bannerAd.style.left = (screenWidth - size.width) / 2;
+      bannerAd.style.top = screenHeight - size.height - (safeArea.bottom || 0);
+    };
+    bannerAd.onResize?.(onResize);
+
+    // onError：加载失败时销毁实例并清空引用
+    const onError = () => {
+      bannerAd.offResize?.(onResize);
+      bannerAd.offError?.(onError);
+      bannerAd.destroy?.();
+      if (this._wechatBannerAd === bannerAd) {
+        this._wechatBannerAd = null;
+      }
+    };
+    bannerAd.onError?.(onError);
+
+    // 保存实例引用（用于 hideBanner destroy）
+    this._wechatBannerAd = bannerAd;
+
+    // 显示 Banner
+    bannerAd.show?.().catch(() => {
+      // show 失败时不立即销毁，保留实例以便后续 retry
+      // 真实场景中可在此处做静默降级（如延迟重试）
     });
   }
 

@@ -3,7 +3,7 @@
  * 协调所有游戏系统，主循环，状态机
  */
 
-import { _decorator, Component, Node, instantiate, Prefab, tween, Vec3, Color, Tween, input, Input, KeyCode, director, Sprite, UIOpacity, UITransform, Graphics, Label, Button, SpriteFrame, resources, Vec3 as CcVec3 } from 'cc';
+import { _decorator, Component, Node, instantiate, Prefab, tween, Vec3, Color, Tween, input, Input, KeyCode, director, Sprite, UIOpacity, UITransform, Graphics, Label, Button, SpriteFrame, Vec3 as CcVec3, view } from 'cc';
 import { GameConfig, PermanentUpgradeId, SupplyCardStar, SupplyCardType, SupplyChestConfigData, SupplyChestQuality, SupplyMode, SupplyOptionData, WaveDefinitionData, WeaponEvolutionData, WeaponEvolutionId } from '../data/GameConfig';
 import { WeaponTierSystem } from '../components/WeaponTierSystem';
 import { AttackTarget, PlayerCar } from '../components/PlayerCar';
@@ -21,6 +21,7 @@ import { HUDController } from '../ui/HUDController';
 import { GameOverScreen } from '../ui/GameOverScreen';
 import { DebugScreen } from '../ui/DebugScreen';
 import { GarageScreen } from '../ui/GarageScreen';
+import { BundleLoader } from './BundleLoader';
 
 const { ccclass, property } = _decorator;
 
@@ -113,6 +114,7 @@ export class GameManager extends Component {
   private _baseRunReward: RunReward = { coins: 0, parts: 0 };
   private _baseRewardGranted: boolean = false;
   private _doubleRewardClaimed: boolean = false;
+  private _runSerial: number = 0;
 
   // 补给与临时增益
   private _lastSupplyWaveOffered: number = 0;
@@ -454,14 +456,125 @@ export class GameManager extends Component {
   }
 
   private _loadVfxResources(): void {
-    if (this._areaExplosionFrame) return;
-    resources.load('vfx/area-explosion-v1/spriteFrame', SpriteFrame, (err, frame) => {
+    if (this._areaExplosionFrame) {
+      this._loadSceneSpriteFrames();
+      return;
+    }
+    BundleLoader.loadAsset('battle', 'vfx/area-explosion-v1/spriteFrame', SpriteFrame, (err, frame) => {
       if (err) {
         console.warn('[GameManager] failed to load area explosion sprite:', err);
         return;
       }
       this._areaExplosionFrame = frame;
     });
+    this._loadSceneSpriteFrames();
+  }
+
+  private _loadSceneSpriteFrames(): void {
+    const sceneSprites: [string[], string][] = [
+      [['Canvas', 'Bridge'], 'ui/game/battle-bg-road-supply-lane-v3/spriteFrame'],
+      [['Canvas', 'Bridge', 'PlayerZoneOverlay'], 'ui/game/battle-player-zone-v1/spriteFrame'],
+      [['Canvas', 'Bridge', 'RailFence'], 'ui/game/battle-rail-fence-v1/spriteFrame'],
+      [['Canvas', 'GameLayer', 'PlayerCar', 'CarGraphics'], 'car_frames_v3/car_0/spriteFrame'],
+      [['Canvas', 'GameLayer', 'PlayerCar', 'MuzzleFlash'], 'car_fx/muzzle_v2/muzzle_flash_0/spriteFrame'],
+      [['Canvas', 'GameLayer', 'PlayerCar', 'RearThruster'], 'car_fx/thruster/thruster_0/spriteFrame'],
+      [['Canvas', 'HUD', 'HUDBack'], 'ui/hud-panel-top-v2/spriteFrame'],
+      [['Canvas', 'HUD', 'LeftGroup', 'HPRow', 'HPBar', 'HPBarBg'], 'ui/common/hud-bar-frame-v2/spriteFrame'],
+      [['Canvas', 'HUD', 'LeftGroup', 'HPRow', 'HPBar', 'HPBarFill'], 'ui/common/hud-bar-fill-hp-v1/spriteFrame'],
+      [['Canvas', 'HUD', 'PauseButton', 'PauseIcon'], 'ui/common/icon-pause-white-256/spriteFrame'],
+      [['Canvas', 'HUD', 'PauseButton', 'PlayIcon'], 'ui/common/icon-play-white-256/spriteFrame'],
+      [['Canvas', 'HUD', 'RightGroup', 'KillRow', 'ExpBar', 'ExpBarBg'], 'ui/common/hud-bar-frame-v2/spriteFrame'],
+      [['Canvas', 'HUD', 'RightGroup', 'KillRow', 'ExpBar', 'ExpBarFill'], 'ui/common/hud-bar-fill-progress-v1/spriteFrame'],
+      [['Canvas', 'Overlay', 'DebugScreen', 'Bg'], 'ui/panel_fill_v1/spriteFrame'],
+      [['Canvas', 'Overlay', 'DebugScreen', 'BackBtn'], 'ui/common/btn-secondary-v1/spriteFrame'],
+      [['Canvas', 'Overlay', 'DebugScreen', 'ConfirmBtn'], 'ui/common/btn-secondary-v1/spriteFrame'],
+      [['Canvas', 'Overlay', 'DebugScreen', 'LevelMinusBtn'], 'ui/common/btn-arrow-v1/spriteFrame'],
+      [['Canvas', 'Overlay', 'DebugScreen', 'LevelPlusBtn'], 'ui/common/btn-arrow-v1/spriteFrame'],
+      [['Canvas', 'Overlay', 'DebugScreen', 'ResetProgressBtn'], 'ui/common/btn-secondary-v1/spriteFrame'],
+      [['Canvas', 'Overlay', 'DebugScreen', 'WaveMinusBtn'], 'ui/common/btn-arrow-v1/spriteFrame'],
+      [['Canvas', 'Overlay', 'DebugScreen', 'WavePlusBtn'], 'ui/common/btn-arrow-v1/spriteFrame'],
+      [['Canvas', 'Overlay', 'GameOverScreen', 'Bg'], 'ui/start/start-bg-wasteland-v1/spriteFrame'],
+      [['Canvas', 'Overlay', 'GameOverScreen', 'Bg', 'BannerAdSlot'], 'ui/panel_fill_v1/spriteFrame'],
+      [['Canvas', 'Overlay', 'GameOverScreen', 'Bg', 'ContentShade'], 'ui/panel_fill_v1/spriteFrame'],
+      [['Canvas', 'Overlay', 'GameOverScreen', 'Bg', 'DoubleRewardBtn'], 'ui/common/btn-primary-v1/spriteFrame'],
+      [['Canvas', 'Overlay', 'GameOverScreen', 'Bg', 'DoubleRewardBtn', 'AdVideo'], 'ui/common/video-icon-transparent-256/spriteFrame'],
+      [['Canvas', 'Overlay', 'GameOverScreen', 'Bg', 'MenuBtn'], 'ui/common/btn-secondary-v1/spriteFrame'],
+      [['Canvas', 'Overlay', 'GameOverScreen', 'Bg', 'Panel'], 'ui/supply-panel-frame-v1/spriteFrame'],
+      [['Canvas', 'Overlay', 'GameOverScreen', 'Bg', 'RestartBtn'], 'ui/common/btn-secondary-v1/spriteFrame'],
+      [['Canvas', 'Overlay', 'GarageScreen', 'Bg'], 'ui/panel_fill_v1/spriteFrame'],
+      [['Canvas', 'Overlay', 'GarageScreen', 'Panel'], 'ui/common/supply-card-portrait-v2/spriteFrame'],
+      [['Canvas', 'Overlay', 'GarageScreen', 'Panel', 'BackBtn'], 'ui/common/btn-secondary-v1/spriteFrame'],
+      [['Canvas', 'Overlay', 'GarageScreen', 'Panel', 'TopBar', 'CoinsChip'], 'ui/common/btn-secondary-v1/spriteFrame'],
+      [['Canvas', 'Overlay', 'GarageScreen', 'Panel', 'TopBar', 'CoinsChip', 'CoinIcon'], 'ui/common/icons_reward_v2/icon_coin/spriteFrame'],
+      [['Canvas', 'Overlay', 'GarageScreen', 'Panel', 'TopBar', 'PartsChip'], 'ui/common/btn-secondary-v1/spriteFrame'],
+      [['Canvas', 'Overlay', 'GarageScreen', 'Panel', 'TopBar', 'PartsChip', 'PartsIcon'], 'ui/common/icons_reward_v2/icon_parts/spriteFrame'],
+      [['Canvas', 'Overlay', 'GarageScreen', 'Panel', 'UpgradeCarAttackRow'], 'ui/hud-panel-top-v1/spriteFrame'],
+      [['Canvas', 'Overlay', 'GarageScreen', 'Panel', 'UpgradeCarAttackRow', 'StarLabel'], 'ui/common/icon-weapon-v1/spriteFrame'],
+      [['Canvas', 'Overlay', 'GarageScreen', 'Panel', 'UpgradeCarHpRow'], 'ui/hud-panel-top-v1/spriteFrame'],
+      [['Canvas', 'Overlay', 'GarageScreen', 'Panel', 'UpgradeCarHpRow', 'StarLabel'], 'ui/common/icon-hp-v1/spriteFrame'],
+      [['Canvas', 'Overlay', 'GarageScreen', 'Panel', 'UpgradePartsBonusRow'], 'ui/hud-panel-top-v1/spriteFrame'],
+      [['Canvas', 'Overlay', 'GarageScreen', 'Panel', 'UpgradePartsBonusRow', 'Icon'], 'ui/common/icons_reward_v2/icon_parts/spriteFrame'],
+      [['Canvas', 'Overlay', 'GarageScreen', 'Panel', 'UpgradeReviveBonusRow'], 'ui/hud-panel-top-v1/spriteFrame'],
+      [['Canvas', 'Overlay', 'GarageScreen', 'Panel', 'UpgradeReviveBonusRow', 'Icon'], 'ui/common/icons_reward_v2/icon_energy_core/spriteFrame'],
+      [['Canvas', 'Overlay', 'GarageScreen', 'Panel', 'UpgradeStartingCoinsRow'], 'ui/hud-panel-top-v1/spriteFrame'],
+      [['Canvas', 'Overlay', 'GarageScreen', 'Panel', 'UpgradeStartingCoinsRow', 'Icon'], 'ui/common/icons_reward_v2/icon_coin/spriteFrame'],
+      [['Canvas', 'Overlay', 'GarageScreen', 'Panel', 'UpgradeSupplyQualityRow'], 'ui/hud-panel-top-v1/spriteFrame'],
+      [['Canvas', 'Overlay', 'GarageScreen', 'Panel', 'UpgradeSupplyQualityRow', 'Icon'], 'ui/common/icons_reward_v2/icon_supply_token/spriteFrame'],
+      [['Canvas', 'Overlay', 'GarageScreen', 'Panel', 'UpgradeWeaponTierRow'], 'ui/hud-panel-top-v1/spriteFrame'],
+      [['Canvas', 'Overlay', 'GarageScreen', 'Panel', 'UpgradeWeaponTierRow', 'Icon'], 'ui/common/icon-stage-v1/spriteFrame'],
+      [['Canvas', 'Overlay', 'ReviveOfferPanel', 'Backdrop'], 'ui/panel_fill_v1/spriteFrame'],
+      [['Canvas', 'Overlay', 'ReviveOfferPanel', 'DialogPanel'], 'ui/panel_fill_v1/spriteFrame'],
+      [['Canvas', 'Overlay', 'ReviveOfferPanel', 'DialogPanel', 'AccentBar'], 'ui/panel_fill_v1/spriteFrame'],
+      [['Canvas', 'Overlay', 'ReviveOfferPanel', 'DialogPanel', 'GiveUpBtn'], 'ui/common/btn-secondary-v1/spriteFrame'],
+      [['Canvas', 'Overlay', 'ReviveOfferPanel', 'DialogPanel', 'ReviveAdBtn'], 'ui/common/btn-primary-v1/spriteFrame'],
+      [['Canvas', 'Overlay', 'ReviveOfferPanel', 'DialogPanel', 'ReviveAdBtn', 'AdVideo'], 'ui/common/video-icon-transparent-256/spriteFrame'],
+      [['Canvas', 'Overlay', 'StartScreen', 'ActionBlock', 'GarageButton'], 'ui/hud-panel-top-v1/spriteFrame'],
+      [['Canvas', 'Overlay', 'StartScreen', 'ActionBlock', 'StartButton'], 'ui/common/btn-primary-v1/spriteFrame'],
+      [['Canvas', 'Overlay', 'StartScreen', 'Bg'], 'ui/start/start-bg-wasteland-v1/spriteFrame'],
+      [['Canvas', 'Overlay', 'StartScreen', 'HeroBlock', 'HeroPanel', 'Bg'], 'ui/panel_fill_v1/spriteFrame'],
+      [['Canvas', 'Overlay', 'StartScreen', 'HeroBlock', 'HeroPanel', 'HeroBackdrop'], 'ui/hud-panel-top-v2/spriteFrame'],
+      [['Canvas', 'Overlay', 'StartScreen', 'StageBlock', 'NextStageButton'], 'ui/common/btn-arrow-v1/spriteFrame'],
+      [['Canvas', 'Overlay', 'StartScreen', 'StageBlock', 'PrevStageButton'], 'ui/common/btn-arrow-v1/spriteFrame'],
+      [['Canvas', 'Overlay', 'StartScreen', 'StageBlock', 'StageCard'], 'ui/start/start-stage-card-v1/spriteFrame'],
+      [['Canvas', 'Overlay', 'StartScreen', 'UtilityBar', 'DebugButton'], 'ui/common/btn-secondary-v1/spriteFrame'],
+      [['Canvas', 'Overlay', 'SupplyPanel', 'BannerAdSlot'], 'ui/panel_fill_v1/spriteFrame'],
+      [['Canvas', 'Overlay', 'SupplyPanel', 'PanelBg'], 'ui/supply-panel-frame-v1/spriteFrame'],
+      [['Canvas', 'Overlay', 'SupplyPanel', 'PanelRoot'], 'ui/supply-panel-frame-v1/spriteFrame'],
+      [['Canvas', 'Overlay', 'SupplyPanel', 'PanelRoot', 'AdButton'], 'ui/common/supply-ad-button-wide-v2/spriteFrame'],
+      [['Canvas', 'Overlay', 'SupplyPanel', 'PanelRoot', 'AdButton', 'AdVideo'], 'ui/common/video-icon-transparent-256/spriteFrame'],
+      [['Canvas', 'Overlay', 'SupplyPanel', 'PanelRoot', 'Cards', 'CardCenter'], 'ui/common/supply-card-portrait-v2/spriteFrame'],
+      [['Canvas', 'Overlay', 'SupplyPanel', 'PanelRoot', 'Cards', 'CardLeft'], 'ui/common/supply-card-portrait-v2/spriteFrame'],
+      [['Canvas', 'Overlay', 'SupplyPanel', 'PanelRoot', 'Cards', 'CardRight'], 'ui/common/supply-card-portrait-v2/spriteFrame'],
+    ];
+    for (const [nodePath, assetPath] of sceneSprites) {
+      this._loadNodeSpriteFrame(nodePath, assetPath);
+    }
+  }
+
+  private _loadNodeSpriteFrame(path: string[], assetPath: string): void {
+    const target = this._findNodeByPath(path);
+    const sprites = target?.getComponents(Sprite) || [];
+    if (sprites.length === 0) return;
+    BundleLoader.loadAsset('battle', assetPath, SpriteFrame, (err, frame) => {
+      if (err || !frame) {
+        console.warn(`[GameManager] failed to load ${assetPath}:`, err);
+        return;
+      }
+      for (const sprite of sprites) {
+        if (sprite.isValid) {
+          sprite.spriteFrame = frame;
+        }
+      }
+    });
+  }
+
+  private _findNodeByPath(path: string[]): Node | null {
+    let current: Node | null = director.getScene() || null;
+    for (const name of path) {
+      current = current?.getChildByName(name) || null;
+      if (!current) return null;
+    }
+    return current;
   }
 
   private _updatePlaying(dt: number): void {
@@ -915,7 +1028,7 @@ export class GameManager extends Component {
 
     const waveData = this._waveManager.getWaveData(Math.max(0, this._waveManager.waveIndex));
     enemy.init(waveData, this._waveManager.currentWaveNum, 0, 0, 1, 1, Math.max(GameConfig.bridge.left + 20, Math.min(GameConfig.bridge.right - 20, x)), type);
-    enemy.setWorldPosition(enemy.x, Math.min(GameConfig.bridge.top + 140, y));
+    enemy.setWorldPosition(enemy.x, Math.min(GameConfig.bridge.battleTop + 140, y));
     this._waveManager.enemies.push(enemy);
   }
 
@@ -1900,7 +2013,11 @@ export class GameManager extends Component {
     };
 
     if (this._isDelayedVisualSupplyOption(option)) {
-      this.scheduleOnce(apply, 0);
+      const runSerial = this._runSerial;
+      this.scheduleOnce(() => {
+        if (!this.node?.isValid || runSerial !== this._runSerial) return;
+        apply();
+      }, 0);
       return;
     }
 
@@ -2033,10 +2150,6 @@ export class GameManager extends Component {
       coreHex: '#ffcb8f',
       flashHex: '#ffd79c',
       damageDelay: GameManager.SHOCKWAVE_DAMAGE_DELAY,
-      noticeText: '震荡清场',
-      noticeColor: new Color(255, 220, 168),
-      noticeX: originX,
-      noticeY: originY + 28,
       onDamage: (enemy) => {
         enemy.pushBack(distance);
         if (damage > 0) {
@@ -2054,10 +2167,6 @@ export class GameManager extends Component {
       coreHex: '#ffb55f',
       flashHex: '#ffe7b4',
       damageDelay: GameManager.AIRSTRIKE_DAMAGE_DELAY,
-      noticeText: '空袭支援',
-      noticeColor: new Color(255, 215, 150),
-      noticeX: 0,
-      noticeY: GameConfig.bridge.top - 40,
       onDamage: (enemy) => {
         this._damageEnemy(enemy, Math.max(1, damage));
       },
@@ -2071,14 +2180,14 @@ export class GameManager extends Component {
     coreHex: string;
     flashHex: string;
     damageDelay: number;
-    noticeText: string;
-    noticeColor: Color;
-    noticeX: number;
-    noticeY: number;
     onDamage: (enemy: Enemy) => void;
   }): void {
     const enemies = this._getAliveEnemiesSnapshot();
     if (enemies.length === 0) return;
+    const targets = enemies.map(enemy => ({
+      enemy,
+      spawnToken: enemy.spawnToken,
+    }));
 
     const hitPositions = enemies.map(enemy => ({ x: enemy.x, y: enemy.y }));
     this._showAreaBlastFx(
@@ -2090,17 +2199,18 @@ export class GameManager extends Component {
       config.flashHex
     );
 
+    const runSerial = this._runSerial;
     this.scheduleOnce(() => {
+      if (!this.node?.isValid || runSerial !== this._runSerial) return;
       this._suppressEnemyKillFx++;
-      for (const enemy of enemies) {
-        if (!enemy.dead) {
+      for (const target of targets) {
+        const { enemy, spawnToken } = target;
+        if (!enemy.dead && enemy.spawnToken === spawnToken) {
           config.onDamage(enemy);
         }
       }
       this._suppressEnemyKillFx--;
     }, config.damageDelay);
-
-    this._showFloatingNotice(config.noticeX, config.noticeY, config.noticeText, config.noticeColor);
   }
 
   private _showAreaBlastFx(
@@ -2165,7 +2275,9 @@ export class GameManager extends Component {
       echoNodes.forEach(({ node: echoNode, opacity: echoOpacity }, index) => {
         const delay = 0.03 + index * 0.06;
         const volume = Math.max(0.72, 1.34 - index * 0.1);
+        const runSerial = this._runSerial;
         this.scheduleOnce(() => {
+          if (!this.node?.isValid || runSerial !== this._runSerial) return;
           this._audioManager?.heavyExplodeAt(volume);
         }, delay);
         tween(echoOpacity)
@@ -2427,12 +2539,15 @@ export class GameManager extends Component {
     const cfg = this._getSupplyChestConfig();
     this._chestSelectionsThisRun++;
     this._spawnChestDestroyFx(chest);
+    this._playChestDestroySfx(chest);
     this._freezeBattle();
     chest.reset();
     this._reflowChestTrack();
     this._chestSpawnTimer = 0;
     this._chestSpawnDelay = Math.max(0.15, cfg.refillDelay || 0.45);
+    const runSerial = this._runSerial;
     this.scheduleOnce(() => {
+      if (!this.node?.isValid || runSerial !== this._runSerial) return;
       if (!this.node?.isValid) return;
       const shown = this._showSupplyChestReward(chest);
       if (!shown) {
@@ -2525,6 +2640,25 @@ export class GameManager extends Component {
         fragmentColor,
         fragmentEdgeColor
       );
+    }
+  }
+
+  private _playChestDestroySfx(chest: SupplyChest): void {
+    if (!this._audioManager) return;
+
+    switch (chest.quality) {
+      case 'legendary':
+        this._audioManager.heavyExplodeAt(0.9);
+        break;
+      case 'rare':
+        this._audioManager.explodeAt(1.1);
+        break;
+      case 'elite':
+        this._audioManager.explodeAt(1.0);
+        break;
+      default:
+        this._audioManager.explodeAt(0.92);
+        break;
     }
   }
 
@@ -2988,6 +3122,8 @@ export class GameManager extends Component {
 
   startGame(startWave?: number, startTier?: number, forcedEvolution?: WeaponEvolutionId | 'none'): void {
     const permanentBonuses = this._progressManager.getPermanentBonuses();
+    this._runSerial++;
+    this.unscheduleAllCallbacks();
     this._state = 'playing';
     this._kills = 0;
     this._bullets = [];
@@ -3354,14 +3490,14 @@ export class GameManager extends Component {
 
   private _setupChestTrack(): void {
     const cfg = this._getSupplyChestConfig();
-    const bridgeHeight = GameConfig.bridge.top - GameConfig.bridge.railY;
+    const bridgeHeight = GameConfig.bridge.battleTop - GameConfig.bridge.railY;
     const capacity = Math.max(1, cfg.capacity || 1);
     const laneCount = GameConfig.bridge.laneCount;
     const laneWidth = (GameConfig.bridge.right - GameConfig.bridge.left) / laneCount;
     const laneIndex = Math.max(0, Math.min(laneCount - 1, cfg.laneIndex || 0));
     const laneAnchor = laneIndex <= 0 ? 0.34 : laneIndex >= laneCount - 1 ? 0.66 : 0.5;
     this._chestTrackX = GameConfig.bridge.left + (laneIndex + laneAnchor) * laneWidth;
-    const stopY = GameConfig.bridge.top - bridgeHeight * Math.max(0.1, Math.min(0.9, cfg.stopRatio || 0.75));
+    const stopY = GameConfig.bridge.battleTop - bridgeHeight * Math.max(0.1, Math.min(0.9, cfg.stopRatio || 0.75));
     const gap = Math.max((cfg.radius || 58) * 1.35, cfg.slotGap || 18);
     this._chestSlots = [];
     for (let i = 0; i < capacity; i++) {
@@ -3412,7 +3548,7 @@ export class GameManager extends Component {
   }
 
   private _getChestSpawnY(): number {
-    return GameConfig.bridge.top + Math.max(40, (this._getSupplyChestConfig().radius || 58) * 1.8);
+    return GameConfig.bridge.battleTop + Math.max(40, (this._getSupplyChestConfig().radius || 58) * 1.8);
   }
 
   private _getStageDefs(): Array<{ label: string; name: string; waveCount: number; rewardBonus: { coins: number; parts: number }; startWave?: number }> {
@@ -3607,23 +3743,26 @@ export class GameManager extends Component {
   private _onTouchStart(event: any): void {
     if (this._state !== 'playing') return;
     if (!this._playerCar) return;
-    const worldX = this._screenToWorldX(event.getLocation().x);
+    const worldX = this._touchToWorldX(event);
     this._playerCar.onTouchStart(worldX);
   }
 
   private _onTouchMove(event: any): void {
     if (this._state !== 'playing') return;
     if (!this._playerCar) return;
-    const worldX = this._screenToWorldX(event.getLocation().x);
+    const worldX = this._touchToWorldX(event);
     this._playerCar.onTouchMove(worldX);
   }
 
   /**
-   * 将屏幕 X 像素坐标转换为游戏世界 X 坐标
-   * 设计分辨率 720 宽，原点在中心 → 屏幕 x=0 → worldX=-360
+   * 将触摸 X 坐标转换为设计分辨率下的世界 X。
+   * 微信小游戏与 H5 的触摸坐标缩放可能不同，统一按可见视图宽映射到 720 设计宽。
    */
-  private _screenToWorldX(screenX: number): number {
-    return screenX - GameConfig.canvas.width / 2;
+  private _touchToWorldX(event: any): number {
+    const location = event.getUILocation ? event.getUILocation() : event.getLocation();
+    const visibleWidth = Math.max(1, view.getVisibleSize().width);
+    const designX = location.x / visibleWidth * GameConfig.canvas.width;
+    return designX - GameConfig.canvas.width / 2;
   }
 
   private _onTouchEnd(event: any): void {

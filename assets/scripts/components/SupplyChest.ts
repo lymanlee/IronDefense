@@ -2,8 +2,9 @@
  * SupplyChest.ts - 战斗中可击毁的补给宝箱
  */
 
-import { _decorator, Color, Component, Graphics, Label, Node, Sprite, SpriteFrame, UITransform, UIOpacity, Vec3, resources } from 'cc';
+import { _decorator, Color, Component, Graphics, Label, Node, Sprite, SpriteFrame, UITransform, UIOpacity, Vec3 } from 'cc';
 import { SupplyChestQuality } from '../data/GameConfig';
+import { BundleLoader } from '../managers/BundleLoader';
 
 const { ccclass } = _decorator;
 
@@ -557,7 +558,7 @@ export class SupplyChest extends Component {
   private _preloadVisuals(): void {
     if (SupplyChest._loadedAll || SupplyChest._loadingAll) return;
     SupplyChest._loadingAll = true;
-    resources.loadDir(SupplyChest.CHEST_RESOURCE_DIR, SpriteFrame, (err, frames) => {
+    BundleLoader.loadDir('battle', SupplyChest.CHEST_RESOURCE_DIR, SpriteFrame, (err, frames) => {
       SupplyChest._loadingAll = false;
       if (err || !frames) {
         console.warn('[SupplyChest] Failed to load chest sprite frames:', err);

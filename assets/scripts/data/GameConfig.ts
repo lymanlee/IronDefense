@@ -13,12 +13,12 @@ export const GameConfig = {
   },
 
   // ============================================
-  // 桥面布局（相对于 Canvas 中心 (0, 0)）
+  // 战斗区布局（相对于 Canvas 中心 (0, 0)）
   // ============================================
   bridge: {
     left: -280,       // 桥左边界 x（原 80 - 360）
     right: 300,       // 桥右边界 x（原 640 - 360）
-    top: 430,         // 桥顶端 y（下移出生区，避免压住 HUD）
+    battleTop: 530,   // 战斗区上边界 / 敌人出生参考线（避免压住 HUD）
     laneCount: 5,     // 桥面列数
     railY: -480,      // 护栏 y 坐标（上移，给战车更多活动空间）
     carY: -540,       // 武装车 y 坐标（与护栏保持间隔，整体上移）
@@ -376,39 +376,39 @@ export const GameConfig = {
   wavePauseTime: 3.0,  // 两波之间的休息秒数，兼容补给选择与广告入口
 
   // ============================================
-  // 广告占位配置
-  // provider: simulated=本地3秒模拟观看；wechat=后续接入微信广告
-  // 所有插入点通过 placement 语义调用，方便后续调整位置
+  // 广告配置
+  // provider: simulated=本地3秒模拟观看（开发调试）；wechat=微信广告真机上线
+  // 切换上线步骤：1.申请流量主 → 2.创建广告位拿到 adUnitId → 3.改 provider 为 'wechat' 并填入 adUnitId
   // ============================================
   ads: {
-    provider: 'simulated',
-    simulateSeconds: 3,
+    provider: 'simulated',     // TODO 上线时改为 'wechat'
+    simulateSeconds: 3,        // 调试用，上线后保留以便回退调试
     rewarded: {
       revive: {
         enabled: true,
-        adUnitId: '',
+        adUnitId: '',           // TODO 填入微信广告位 ID（格式 adunit-xxxxxxxxxx）
         title: '观看广告复活',
       },
       supply: {
         enabled: true,
-        adUnitId: '',
+        adUnitId: '',           // TODO 填入微信广告位 ID
         title: '观看广告领取额外补给',
       },
       doubleReward: {
         enabled: true,
-        adUnitId: '',
+        adUnitId: '',           // TODO 填入微信广告位 ID
         title: '观看广告双倍结算',
       },
     },
     interstitial: {
       enabled: true,
-      adUnitId: '',
+      adUnitId: '',             // TODO 填入微信广告位 ID
       cooldownSec: 120,
       minRunTimeSec: 60,
     },
     banner: {
       enabled: true,
-      adUnitId: '',
+      adUnitId: '',             // TODO 填入微信广告位 ID
     },
   },
 

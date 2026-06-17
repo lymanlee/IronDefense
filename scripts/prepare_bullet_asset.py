@@ -9,7 +9,7 @@ from PIL import Image
 
 ROOT_DIR = Path(__file__).resolve().parent.parent
 DEFAULT_INPUT = ROOT_DIR / "output" / "imagegen" / "bullet-upgrade" / "bullet-energy-white-v1.png"
-DEFAULT_OUTPUT = ROOT_DIR / "assets" / "textures" / "bullet_white.png"
+DEFAULT_OUTPUT = ROOT_DIR / "assets" / "bundles" / "battle" / "textures" / "bullet_white.png"
 OUTPUT_SIZE = (128, 128)
 
 
