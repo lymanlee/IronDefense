@@ -428,9 +428,6 @@ export const GameConfig = {
       partsPerThreeWaves: 1,
     },
     supply: {
-      mode: 'chest_trigger',
-      offerEveryWaves: 2,
-      bossWaveEvery: 5,
       choiceCount: 3,
       maxAdExtrasPerRun: 5,
       qualityBonusPerTier: 0.08,
@@ -991,8 +988,6 @@ export interface SupplyOptionData {
     evolutionId?: WeaponEvolutionId;
   };
 }
-
-export type SupplyMode = 'wave_break' | 'chest_trigger';
 
 export type SupplyCardType = 'firepower' | 'control';
 

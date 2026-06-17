@@ -4,7 +4,7 @@
  */
 
 import { _decorator, Component, Node, instantiate, Prefab, tween, Vec3, Color, Tween, input, Input, KeyCode, director, Sprite, UIOpacity, UITransform, Graphics, Label, Button, SpriteFrame, Vec3 as CcVec3, view } from 'cc';
-import { GameConfig, PermanentUpgradeId, SupplyCardStar, SupplyCardType, SupplyChestConfigData, SupplyChestQuality, SupplyMode, SupplyOptionData, WaveDefinitionData, WeaponEvolutionData, WeaponEvolutionId } from '../data/GameConfig';
+import { GameConfig, PermanentUpgradeId, SupplyCardStar, SupplyCardType, SupplyChestConfigData, SupplyChestQuality, SupplyOptionData, WaveDefinitionData, WeaponEvolutionData, WeaponEvolutionId } from '../data/GameConfig';
 import { WeaponTierSystem } from '../components/WeaponTierSystem';
 import { AttackTarget, PlayerCar } from '../components/PlayerCar';
 import { Enemy } from '../components/Enemy';
@@ -579,7 +579,6 @@ export class GameManager extends Component {
 
   private _updatePlaying(dt: number): void {
     if (!this._waveManager || !this._playerCar || !this._weaponTierSystem) return;
-    const supplyMode = this._getSupplyMode();
 
     // 更新屏幕闪红效果
     this._updateDamageFlash(dt);
@@ -590,9 +589,6 @@ export class GameManager extends Component {
       this._stageVictoryPending = true;
     }
     this._refreshWaveBonuses();
-    if (!this._stageVictoryPending && supplyMode === 'wave_break' && this._maybeShowSupplyOffer()) {
-      return;
-    }
 
     // 更新敌人
     const enemies = this._waveManager.activeEnemies;
@@ -1673,83 +1669,6 @@ export class GameManager extends Component {
     this._gameOverScreen?.setDoubleRewardAvailable(false);
   }
 
-  private _maybeShowSupplyOffer(): boolean {
-    if (!this._waveManager || !this._playerCar) return false;
-    if (!this._waveManager.inPause) return false;
-
-    const nextWave = this._waveManager.currentWaveNum;
-    if (this._lastSupplyWaveOffered === nextWave) return false;
-    if (!this._shouldOfferSupply(nextWave)) return false;
-
-    this._lastSupplyWaveOffered = nextWave;
-    return this._showSupplyPanel(nextWave);
-  }
-
-  private _shouldOfferSupply(nextWave: number): boolean {
-    if (nextWave <= 1) return false;
-    const cfg = GameConfig.gameplay.supply;
-    const regular = cfg.offerEveryWaves > 0 && nextWave % cfg.offerEveryWaves === 0;
-    const boss = cfg.bossWaveEvery > 0 && nextWave % cfg.bossWaveEvery === 0;
-    return regular || boss;
-  }
-
-  private _showSupplyPanel(nextWave: number): boolean {
-    this._cacheSupplyPanelRefs();
-    if (!this._supplyPanelNode?.isValid) return false;
-    let currentChoices = this._pickSupplyOptions();
-    if (currentChoices.length === 0) return false;
-    this._freezeBattle();
-    this._state = 'supply';
-    this._refreshPauseButtonState();
-    let refreshQuality: SupplyChestQuality = 'normal';
-    let refreshSerial = 0;
-    const renderPanel = (statusText: string): void => {
-      this._populateSupplyPanel(
-        `第${nextWave}波前补给`,
-        this._getStageEnemyHint(),
-        '补给仅本关生效',
-        statusText,
-        currentChoices,
-        async () => {
-          if (this._getSupplyAdRefreshRemaining() <= 0) {
-            this._refreshSupplyAdArea();
-            if (this._supplyPanelStatusLabel) this._supplyPanelStatusLabel.string = '本局广告刷新次数已用完';
-            return;
-          }
-          this._state = 'ad';
-          this._refreshPauseButtonState();
-          const completed = await this._adsManager.showRewarded('supply');
-          this._state = 'supply';
-          this._refreshPauseButtonState();
-          if (!completed) {
-            this._refreshSupplyAdArea();
-            return;
-          }
-          this._supplyAdExtrasUsed++;
-          refreshQuality = this._getSupplyAdRefreshQuality(refreshQuality);
-          refreshSerial += 2;
-          const refreshed = this._pickSupplyOptions(refreshQuality, refreshSerial + this._supplyAdExtrasUsed);
-          if (refreshed.length === 0) {
-            this._refreshSupplyAdArea();
-            if (this._supplyPanelStatusLabel) this._supplyPanelStatusLabel.string = '暂无可刷新的补给卡';
-            return;
-          }
-          currentChoices = refreshed;
-          renderPanel(`已刷新补给卡 · ${this._getChestQualityName(refreshQuality)}品质概率提升`);
-        },
-        (option, nodes) => {
-          if (this._supplyPanelStatusLabel) this._supplyPanelStatusLabel.string = `已获得: ${option.title}`;
-          nodes.forEach(node => this._setButtonEnabled(node, false));
-          this._closeSupplyPanelWithCallback(true, () => {
-            this._applySupplyOptionAfterPanelClose(option);
-          });
-        }
-      );
-    };
-    renderPanel('请选择一张补给卡');
-    return true;
-  }
-
   private _showSupplyChestReward(chest: SupplyChest): boolean {
     this._cacheSupplyPanelRefs();
     if (!this._supplyPanelNode?.isValid) return false;
@@ -1806,42 +1725,6 @@ export class GameManager extends Component {
       );
     };
     renderPanel('选择一张补给卡');
-    this._state = 'supply';
-    this._refreshPauseButtonState();
-    return true;
-  }
-
-  private _showAdvancedSupplyChestReward(chest: SupplyChest): boolean {
-    this._cacheSupplyPanelRefs();
-    if (!this._supplyPanelNode?.isValid) return false;
-    const upgradedQuality = this._getUpgradedChestQuality(chest.quality);
-    if (!upgradedQuality) {
-      return false;
-    }
-    const choices = this._pickSupplyOptions(upgradedQuality, chest.serial + 2);
-    if (choices.length === 0) {
-      this._showFloatingNotice(chest.x, chest.y + 44, '暂无更高级补给', new Color(255, 228, 150));
-      return false;
-    }
-    this._freezeBattle();
-    this._refreshPauseButtonState();
-    this._populateSupplyPanel(
-      `${this._getChestQualityName(chest.quality)}补给升级`,
-      '广告奖励：已刷新为更高级补给，三选一',
-      `${this._getChestQualityName(upgradedQuality)}补给，本关内生效`,
-      '选择一张升级补给卡',
-      choices,
-      async () => {
-        if (this._supplyPanelStatusLabel) this._supplyPanelStatusLabel.string = '高级补给不可再次升级';
-      },
-      (option) => {
-        this._closeSupplyPanelWithCallback(true, () => {
-          this._applySupplyOptionAfterPanelClose(option, () => {
-            this._showFloatingNotice(chest.x, chest.y + 44, option.title, new Color(255, 228, 150));
-          });
-        });
-      }
-    );
     this._state = 'supply';
     this._refreshPauseButtonState();
     return true;
@@ -2455,10 +2338,6 @@ export class GameManager extends Component {
     );
   }
 
-  private _getSupplyMode(): SupplyMode {
-    return (GameConfig.gameplay.supply.mode as SupplyMode) || 'wave_break';
-  }
-
   private _buildAttackTargets(enemies: Enemy[]): AttackTarget[] {
     const targets: AttackTarget[] = [...enemies];
     targets.push(...this._getActiveSupplyChests());
@@ -2501,7 +2380,6 @@ export class GameManager extends Component {
   }
 
   private _updateChestSpawn(dt: number, enemies: Enemy[]): void {
-    if (this._getSupplyMode() !== 'chest_trigger') return;
     if (!this._waveManager || this._waveManager.inPause) return;
 
     const cfg = this._getSupplyChestConfig();
