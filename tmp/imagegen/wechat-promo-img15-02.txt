@@ -1,0 +1,12 @@
+Use case: ads-marketing
+Asset type: WeChat Mini Game vertical promotional image, 720x1280.
+Input image role: reference for wasteland-road mood, tank game world, color palette, and vertical perspective. Create a new cohesive illustration, not a collage.
+Primary request: Generate a polished vertical promotional key art for a tank defense mini game emphasizing supply-card upgrades and growth. The image should visually communicate: collect battlefield supplies, upgrade firepower, choose powerful buffs, become stronger during each run.
+Scene/backdrop: ruined wasteland bridge road at sunset, smoke, dust, cracked ground, distant enemy wave, glowing supply drops and energy crates naturally placed in the battlefield.
+Subject: a compact armored battle tank in the lower foreground pushing forward; around it are three floating holographic supply-card energy projections or glowing upgrade shards integrated into the scene, not flat UI cards; distant enemies and explosions show active combat.
+Style/medium: premium mobile game marketing illustration, stylized realistic, cinematic but casual, cohesive lighting, no obvious manual compositing.
+Composition/framing: vertical 720x1280, tank lower third, supply upgrade effects in middle area, distant battlefield in upper area, clear visual path from tank to upgrades to enemies. No text anywhere.
+Lighting/mood: warm golden sunset mixed with cyan upgrade glow, energetic, rewarding, powerful progression fantasy.
+Color palette: orange wasteland, dark metal tank, cyan-blue upgrade light, gold supply glow, smoky shadows.
+Text: no text, no logo, no watermark.
+Constraints: no Chinese characters, no English words, no UI panels, no flat icons, no readable symbols, no copyrighted content, no gore, no modern military insignia. Must feel like a WeChat mini game ad and communicate gameplay information through scene elements only.

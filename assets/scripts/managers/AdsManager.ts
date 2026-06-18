@@ -1,5 +1,6 @@
 /**
- * AdsManager.ts - 广告管理（模拟 / 微信双模式）
+ * AdsManager.ts - 广告管理（免费 / 模拟 / 微信三模式）
+ * free 模式：生产过渡模式，不展示广告，直接发放奖励
  * simulated 模式：本地 3 秒模拟观看，用于开发调试
  * wechat 模式：调用 wx 广告 API，用于微信小游戏真机上线
  * 所有广告触点通过 placement 语义调用，切换模式只需改 GameConfig.ads.provider
@@ -49,6 +50,8 @@ export class AdsManager {
     if (!config || !config.enabled) return false;
 
     const provider = GameConfig.ads.provider;
+    if (provider === 'free') return true;
+
     const wxApi = (globalThis as any).wx;
     if (provider === 'wechat' && wxApi && config.adUnitId) {
       return this._showWechatRewarded(config.adUnitId);
@@ -60,6 +63,7 @@ export class AdsManager {
   async showInterstitial(placement: InterstitialAdPlacement): Promise<boolean> {
     const config = GameConfig.ads.interstitial;
     if (!config.enabled) return false;
+    if (GameConfig.ads.provider === 'free') return false;
 
     const now = Date.now() / 1000;
     if (now - this._runStartedAt < config.minRunTimeSec) return false;
@@ -77,6 +81,10 @@ export class AdsManager {
   showBanner(placement: BannerPlacement): void {
     const config = GameConfig.ads.banner;
     if (!config.enabled) return;
+    if (GameConfig.ads.provider === 'free') {
+      this.hideBanner();
+      return;
+    }
 
     const wxApi = (globalThis as any).wx;
     if (GameConfig.ads.provider === 'wechat' && wxApi && config.adUnitId) {

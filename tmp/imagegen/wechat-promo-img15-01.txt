@@ -1,0 +1,12 @@
+Use case: ads-marketing
+Asset type: WeChat Mini Game vertical promotional image, 720x1280.
+Input image role: reference for mood, world, perspective, color palette, and tank-defense theme. Create a new polished image, not a collage.
+Primary request: Generate a cinematic vertical promotional key art for a casual tank shooting defense mini game. Show a heavy armored battle tank defending a ruined wasteland road/bridge while enemy vehicles rush from the distance. The player should instantly understand: control a tank, auto-fire, stop enemy waves, protect the defense line.
+Scene/backdrop: post-apocalyptic road and bridge, dusty orange sunset, ruined industrial buildings, smoke columns, cracked asphalt, barricades.
+Subject: one heroic battle tank in the lower foreground firing multiple bright shells toward approaching enemy waves; enemies in the mid-to-far distance; explosions and bullet trails integrated naturally into the scene.
+Style/medium: premium mobile game marketing illustration, stylized realistic, cohesive painterly key art, high impact, no screenshot UI, no hand-made collage look.
+Composition/framing: vertical 720x1280, strong depth from tank foreground to enemy waves, clear top/middle/bottom hierarchy, leave some readable negative space near the top for platform overlays but do not include text.
+Lighting/mood: dramatic golden sunset, hot muzzle flashes, smoke and dust, heroic last-stand energy.
+Color palette: warm orange wasteland, dark steel tank, ember highlights, smoky blue-gray shadows.
+Text: no text, no logo, no watermark.
+Constraints: no Chinese characters, no English words, no UI panels, no icons, no copyrighted content, no gore, no realistic modern military insignia. Must feel like a WeChat mini game ad cover and communicate gameplay clearly.

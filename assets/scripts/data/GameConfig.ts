@@ -377,27 +377,30 @@ export const GameConfig = {
 
   // ============================================
   // 广告配置
-  // provider: simulated=本地3秒模拟观看（开发调试）；wechat=微信广告真机上线
-  // 切换上线步骤：1.申请流量主 → 2.创建广告位拿到 adUnitId → 3.改 provider 为 'wechat' 并填入 adUnitId
+  // provider:
+  // - free=生产过渡模式，不展示广告，直接发放奖励
+  // - simulated=本地3秒模拟观看，仅用于开发调试
+  // - wechat=微信广告真机上线
+  // 切换微信广告步骤：1.申请流量主 → 2.创建广告位拿到 adUnitId → 3.改 provider 为 'wechat' 并填入 adUnitId
   // ============================================
   ads: {
-    provider: 'simulated',     // TODO 上线时改为 'wechat'
+    provider: 'free',
     simulateSeconds: 3,        // 调试用，上线后保留以便回退调试
     rewarded: {
       revive: {
         enabled: true,
         adUnitId: '',           // TODO 填入微信广告位 ID（格式 adunit-xxxxxxxxxx）
-        title: '观看广告复活',
+        title: '观看广告复活',    // simulated模式下显示的标题
       },
       supply: {
         enabled: true,
         adUnitId: '',           // TODO 填入微信广告位 ID
-        title: '观看广告领取额外补给',
+        title: '观看广告领取额外补给',    // simulated模式下显示的标题
       },
       doubleReward: {
         enabled: true,
         adUnitId: '',           // TODO 填入微信广告位 ID
-        title: '观看广告双倍结算',
+        title: '观看广告双倍结算', // simulated模式下显示的标题
       },
     },
     interstitial: {

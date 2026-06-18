@@ -319,6 +319,7 @@ export class GameManager extends Component {
             this._refreshStartStageInfo();
             this._refreshPauseButtonState();
           });
+          this._refreshAdModeIcons(gameOverNode);
         }
         gameOverNode.active = false;
       }
@@ -498,6 +499,7 @@ export class GameManager extends Component {
       [['Canvas', 'Overlay', 'GameOverScreen', 'Bg', 'ContentShade'], 'ui/panel_fill_v1/spriteFrame'],
       [['Canvas', 'Overlay', 'GameOverScreen', 'Bg', 'DoubleRewardBtn'], 'ui/common/btn-primary-v1/spriteFrame'],
       [['Canvas', 'Overlay', 'GameOverScreen', 'Bg', 'DoubleRewardBtn', 'AdVideo'], 'ui/common/video-icon-transparent-256/spriteFrame'],
+      [['Canvas', 'Overlay', 'GameOverScreen', 'Bg', 'DoubleRewardBtn', 'GiftIcon'], 'ui/common/gift-icon-transparent-256/spriteFrame'],
       [['Canvas', 'Overlay', 'GameOverScreen', 'Bg', 'MenuBtn'], 'ui/common/btn-secondary-v1/spriteFrame'],
       [['Canvas', 'Overlay', 'GameOverScreen', 'Bg', 'Panel'], 'ui/supply-panel-frame-v1/spriteFrame'],
       [['Canvas', 'Overlay', 'GameOverScreen', 'Bg', 'RestartBtn'], 'ui/common/btn-secondary-v1/spriteFrame'],
@@ -528,6 +530,7 @@ export class GameManager extends Component {
       [['Canvas', 'Overlay', 'ReviveOfferPanel', 'DialogPanel', 'GiveUpBtn'], 'ui/common/btn-secondary-v1/spriteFrame'],
       [['Canvas', 'Overlay', 'ReviveOfferPanel', 'DialogPanel', 'ReviveAdBtn'], 'ui/common/btn-primary-v1/spriteFrame'],
       [['Canvas', 'Overlay', 'ReviveOfferPanel', 'DialogPanel', 'ReviveAdBtn', 'AdVideo'], 'ui/common/video-icon-transparent-256/spriteFrame'],
+      [['Canvas', 'Overlay', 'ReviveOfferPanel', 'DialogPanel', 'ReviveAdBtn', 'GiftIcon'], 'ui/common/gift-icon-transparent-256/spriteFrame'],
       [['Canvas', 'Overlay', 'StartScreen', 'ActionBlock', 'GarageButton'], 'ui/hud-panel-top-v1/spriteFrame'],
       [['Canvas', 'Overlay', 'StartScreen', 'ActionBlock', 'StartButton'], 'ui/common/btn-primary-v1/spriteFrame'],
       [['Canvas', 'Overlay', 'StartScreen', 'Bg'], 'ui/start/start-bg-wasteland-v1/spriteFrame'],
@@ -542,6 +545,7 @@ export class GameManager extends Component {
       [['Canvas', 'Overlay', 'SupplyPanel', 'PanelRoot'], 'ui/supply-panel-frame-v1/spriteFrame'],
       [['Canvas', 'Overlay', 'SupplyPanel', 'PanelRoot', 'AdButton'], 'ui/common/supply-ad-button-wide-v2/spriteFrame'],
       [['Canvas', 'Overlay', 'SupplyPanel', 'PanelRoot', 'AdButton', 'AdVideo'], 'ui/common/video-icon-transparent-256/spriteFrame'],
+      [['Canvas', 'Overlay', 'SupplyPanel', 'PanelRoot', 'AdButton', 'GiftIcon'], 'ui/common/gift-icon-transparent-256/spriteFrame'],
       [['Canvas', 'Overlay', 'SupplyPanel', 'PanelRoot', 'Cards', 'CardCenter'], 'ui/common/supply-card-portrait-v2/spriteFrame'],
       [['Canvas', 'Overlay', 'SupplyPanel', 'PanelRoot', 'Cards', 'CardLeft'], 'ui/common/supply-card-portrait-v2/spriteFrame'],
       [['Canvas', 'Overlay', 'SupplyPanel', 'PanelRoot', 'Cards', 'CardRight'], 'ui/common/supply-card-portrait-v2/spriteFrame'],
@@ -1508,6 +1512,7 @@ export class GameManager extends Component {
       if (this._doubleRewardClaimed) {
         this._gameOverScreen.setDoubleRewardAvailable(false);
       }
+      this._refreshAdModeIcons(this._gameOverScreen.node);
     }
     if (this._hud) this._hud.node.active = false;
     this._refreshPauseButtonState();
@@ -1613,6 +1618,7 @@ export class GameManager extends Component {
       if (this._doubleRewardClaimed) {
         this._gameOverScreen.setDoubleRewardAvailable(false);
       }
+      this._refreshAdModeIcons(this._gameOverScreen.node);
     }
     if (this._hud) this._hud.node.active = false;
     this._refreshPauseButtonState();
@@ -1691,7 +1697,7 @@ export class GameManager extends Component {
         async () => {
           if (this._getSupplyAdRefreshRemaining() <= 0) {
             this._refreshSupplyAdArea();
-            if (this._supplyPanelStatusLabel) this._supplyPanelStatusLabel.string = '本局广告刷新次数已用完';
+            if (this._supplyPanelStatusLabel) this._supplyPanelStatusLabel.string = '本局刷新次数已用完';
             return;
           }
           this._state = 'ad';
@@ -2678,6 +2684,7 @@ export class GameManager extends Component {
 
   private _refreshSupplyAdArea(): void {
     const remaining = this._getSupplyAdRefreshRemaining();
+    this._refreshAdModeIcons(this._supplyPanelAdButton);
     if (this._supplyPanelAdCountLabel) {
       this._supplyPanelAdCountLabel.string = `本局剩余${remaining}次`;
     }
@@ -2721,6 +2728,7 @@ export class GameManager extends Component {
     this._supplyPanelStatusLabel = panelRoot?.getChildByName('StatusLabel')?.getComponent(Label) || null;
     this._supplyPanelAdButton = panelRoot?.getChildByName('AdButton') || null;
     this._supplyPanelAdCountLabel = this._supplyPanelAdButton?.getChildByName('AdCountLabel')?.getComponent(Label) || null;
+    this._refreshAdModeIcons(this._supplyPanelAdButton);
   }
 
   private _cacheRevivePanelRefs(overlayNode?: Node | null): void {
@@ -2739,6 +2747,7 @@ export class GameManager extends Component {
     this._reviveGiveUpButtonNode?.off(Node.EventType.TOUCH_END, this.onReviveGiveUpClick, this);
     this._reviveAdButtonNode?.on(Node.EventType.TOUCH_END, this.onReviveAdClick, this);
     this._reviveGiveUpButtonNode?.on(Node.EventType.TOUCH_END, this.onReviveGiveUpClick, this);
+    this._refreshAdModeIcons(this._reviveAdButtonNode);
     if (this._revivePanelNode) {
       this._revivePanelNode.active = false;
     }
@@ -2749,10 +2758,31 @@ export class GameManager extends Component {
     const bonus = this._progressManager.getPermanentBonuses();
     const hpRatio = Math.round((GameConfig.gameplay.revive.hpRatio + bonus.reviveHpBonusRatio) * 100);
     const shieldSeconds = GameConfig.gameplay.revive.invulnerableSeconds + bonus.reviveShieldSeconds;
-    this._reviveBodyLabel.string = `看广告复活\n恢复${hpRatio}%耐久，并获得${shieldSeconds}秒无敌`;
+    this._reviveBodyLabel.string = `立即复活\n恢复${hpRatio}%耐久，并获得${shieldSeconds}秒无敌`;
+  }
+
+  private _isFreeAdMode(): boolean {
+    return GameConfig.ads.provider === 'free';
+  }
+
+  private _refreshAdModeIcons(root: Node | null | undefined): void {
+    if (!root?.isValid) return;
+    const showGift = this._isFreeAdMode();
+    this._setAdIconVisibility(root, showGift);
+    for (const child of root.children) {
+      this._refreshAdModeIcons(child);
+    }
+  }
+
+  private _setAdIconVisibility(node: Node, showGift: boolean): void {
+    const videoIcon = node.getChildByName('AdVideo');
+    const giftIcon = node.getChildByName('GiftIcon');
+    if (videoIcon) videoIcon.active = !showGift;
+    if (giftIcon) giftIcon.active = showGift;
   }
 
   private _playSupplyPanelShow(cardNodes: Node[]): void {
+    this._refreshAdModeIcons(this._supplyPanelAdButton);
     const contentNodes: Node[] = [
       this._supplyPanelTitleLabel?.node,
       this._supplyPanelHintLabel?.node,
@@ -2771,6 +2801,7 @@ export class GameManager extends Component {
   }
 
   private _playRevivePanelShow(): void {
+    this._refreshAdModeIcons(this._reviveAdButtonNode);
     const contentNodes: Node[] = [
       this._reviveDialogPanelNode?.getChildByName('AccentBar') || null,
       this._reviveDialogPanelNode?.getChildByName('TitleLabel') || null,

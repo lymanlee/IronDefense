@@ -9,6 +9,9 @@
 ## Notes
 
 - 2026-06-12: `cocos_scene action=hierarchy` from older workflows is no longer available in the latest MCP tool list. Current equivalent workflow uses `cocos_scene_tree`, `cocos_node_find`, and `cocos_node_get`. This is usable, but a compatibility alias or clearer migration hint could reduce friction.
+- 2026-06-17: Older local helper examples used port `3000`, a hard-coded `Mcp-Session-Id`, and old action-style tool names such as `cocos_editor` with `{ action: ... }`. The current packaged extension in this project listens on `127.0.0.1:3603`, requires `initialize` to create a session, then calls namespaced tools through `tools/call` such as `cocos_scene_status`, `cocos_node_find`, `cocos_node_create`, `cocos_component_add`, `cocos_asset_bind_sprite`, and `cocos_scene_save`. The old helper misled the first check into looking at the wrong port and stale tool shape.
+- 2026-06-17: `cocos_scene_status` now returns both scene asset identity fields and editor scene identity fields. This is important because `assets/scenes/MainScene.scene` is only the loading scene in this project, while the playable UI scene is `assets/bundles/game/scenes/MainScene.scene`. MCP edits succeeded on the active bundle scene, but build and preview config still point at the loading scene. Always check `requestedSceneUrl`, `resolvedAssetUrl`, `sceneUrl`, and `assetUuid` before applying scene edits.
+- 2026-06-17: Creating visual UI nodes through MCP worked reliably with the new workflow: `node_create` -> `component_add` for `cc.UITransform` and `cc.Sprite` -> `component_update` for size/color -> `asset_bind_sprite` -> `scene_save`. However, `node_get` detail view only lists component names, so exact UITransform size still required `cocos_debug_component_dump`, whose output is very verbose.
 
 ## Old vs Latest Tooling
 
@@ -32,3 +35,6 @@
 - When an unknown old-style tool/action is called, return a migration hint such as: "Use `cocos_scene_tree` for hierarchy, `cocos_node_find` for lookup, `cocos_node_get` for details."
 - Provide a compact "common recipes" tool or doc response for frequent workflows: hierarchy check, node snapshot, component lookup, reference validation.
 - Consider a `cocos_scene_hierarchy` shortcut that returns a bounded tree with default depth and components off, optimized for quick validation.
+- Expose a stable project-local MCP helper or generated client snippet that reads the actual extension port and always performs `initialize` before `tools/call`. This would avoid stale hard-coded port/session examples.
+- Include `sceneUrl` and `assetUuid` in every mutation result, not just `scene_status`, so saved edits are easier to attribute to the correct scene asset.
+- Add a compact component property read tool for common UI fields such as `UITransform.contentSize`, `UITransform.anchorPoint`, `Sprite.spriteFrame`, `Sprite.sizeMode`, and `Label.string`. This would avoid parsing the large debug dump for routine UI edits.

@@ -185,6 +185,7 @@ export class Enemy extends Component {
     this._speedScale = 1;
     this._speedBoostTimer = 0;
     this._phaseTriggered = false;
+    this._battleFrozen = false;
     this._flashTimer = 0;
     this._attackEffectTimer = 0;
     this._deathTimer = 0;
