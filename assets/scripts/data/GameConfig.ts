@@ -46,9 +46,9 @@ export const GameConfig = {
   // - speed / damage / fireRate: 仍保留按档位成长，但档位职责更接近“基础火力台阶”
   // ============================================
   weaponBase: {
-    profileNames: ['单发高速', '双发快射', '三发齐射', '三发双连', '四发三连', '五发四连'],
+    profileNames: ['单发高速', '双发快射', '三发齐射', '三发双连', '四发双连', '五发双连'],
     baseSpreadCount: [1, 2, 3, 3, 4, 5],
-    baseBurstCount: [1, 1, 1, 2, 3, 4],
+    baseBurstCount: [1, 1, 1, 2, 2, 2],
     spreadAngle: [0, 9, 9, 9, 9, 9],
     burstSpeedScales: [
       [1.0],
