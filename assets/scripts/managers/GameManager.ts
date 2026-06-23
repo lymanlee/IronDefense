@@ -306,6 +306,11 @@ export class GameManager extends Component {
           this._gameOverScreen.setOnRestart(() => {
             this.restart();
           });
+          this._gameOverScreen.setOnGarage(() => {
+            this._gameOverScreen?.hide();
+            this._showGarageScreen();
+          });
+          this._refreshGarageNotifyState();
           this._gameOverScreen.setOnDoubleReward(() => {
             this._handleDoubleRewardAd();
           });
@@ -1102,6 +1107,8 @@ export class GameManager extends Component {
   }
 
   private _spawnBulletImpactFx(bullet: Bullet, x: number, y: number, target: 'enemy' | 'chest'): void {
+    if (target === 'enemy') return;
+
     const vx = bullet.velocityX;
     const vy = bullet.velocityY;
     const speedSq = vx * vx + vy * vy;
@@ -1618,6 +1625,7 @@ export class GameManager extends Component {
       if (this._doubleRewardClaimed) {
         this._gameOverScreen.setDoubleRewardAvailable(false);
       }
+      this._refreshGarageNotifyState();
       this._refreshAdModeIcons(this._gameOverScreen.node);
     }
     if (this._hud) this._hud.node.active = false;
@@ -3175,6 +3183,7 @@ export class GameManager extends Component {
     const upgraded = this._progressManager.upgrade(id);
     if (upgraded) {
       this._garageScreen?.refresh();
+      this._refreshGarageNotifyState();
     }
     return upgraded;
   }
@@ -3184,6 +3193,7 @@ export class GameManager extends Component {
     this._syncCurrentStageSelectionFromProgress();
     this._garageScreen?.refresh();
     this._refreshStartStageInfo();
+    this._refreshGarageNotifyState();
   }
 
   private _cachePauseButtonRefs(hudNode?: Node | null): void {
@@ -3542,7 +3552,13 @@ export class GameManager extends Component {
       canPrev,
       canNext,
     });
-    startScreen.setGarageNotifyVisible(this._hasAnyGarageUpgradeAvailable());
+    this._refreshGarageNotifyState();
+  }
+
+  private _refreshGarageNotifyState(): void {
+    const hasAvailable = this._hasAnyGarageUpgradeAvailable();
+    this._startScreenNode?.getComponent(StartScreen)?.setGarageNotifyVisible(hasAvailable);
+    this._gameOverScreen?.setGarageNotifyVisible(hasAvailable);
   }
 
   private _hasAnyGarageUpgradeAvailable(): boolean {

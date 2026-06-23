@@ -4,6 +4,7 @@
  */
 
 import { _decorator, Button, Color, Component, Label, Node, tween, Tween, UIOpacity, UITransform, Vec3 } from 'cc';
+import { GarageNotifyPulse } from '../components/GarageNotifyPulse';
 
 const { ccclass, property } = _decorator;
 
@@ -14,6 +15,7 @@ export class GameOverScreen extends Component {
 
   private _onRestart: (() => void) | null = null;
   private _onMenu: (() => void) | null = null;
+  private _onGarage: (() => void) | null = null;
   private _onDoubleReward: (() => void) | null = null;
   private _doubleRewardEnabled: boolean = true;
   private _rewardPrefix: string = '结算奖励';
@@ -50,6 +52,12 @@ export class GameOverScreen extends Component {
   @property(Button)
   restartButton: Button | null = null;
 
+  @property(Button)
+  garageButton: Button | null = null;
+
+  @property(Node)
+  garageNotifyNode: Node | null = null;
+
   @property(Node)
   bannerAdSlot: Node | null = null;
 
@@ -65,6 +73,17 @@ export class GameOverScreen extends Component {
 
   setOnMenu(callback: () => void): void {
     this._onMenu = callback;
+  }
+
+  setOnGarage(callback: () => void): void {
+    this._onGarage = callback;
+    this._ensureRefs();
+    if (this.garageButton) {
+      this.garageButton.node.active = !!callback;
+    }
+    if (!callback) {
+      this.setGarageNotifyVisible(false);
+    }
   }
 
   setOnDoubleReward(callback: () => void): void {
@@ -100,6 +119,10 @@ export class GameOverScreen extends Component {
     if (this.restartButton) {
       this.restartButton.node.active = !!this._onRestart;
     }
+    if (this.garageButton) {
+      this.garageButton.node.active = !!this._onGarage;
+    }
+    this._refreshGarageNotifyPulse();
     if (this.bannerAdSlot) {
       this.bannerAdSlot.active = false;
     }
@@ -132,6 +155,10 @@ export class GameOverScreen extends Component {
     if (this.restartButton) {
       this.restartButton.node.active = false;
     }
+    if (this.garageButton) {
+      this.garageButton.node.active = false;
+    }
+    this.setGarageNotifyVisible(false);
     if (this.bannerAdSlot) {
       this.bannerAdSlot.active = false;
     }
@@ -151,6 +178,12 @@ export class GameOverScreen extends Component {
     }
   }
 
+  onGarageClicked(): void {
+    if (this._onGarage) {
+      this._onGarage();
+    }
+  }
+
   onDoubleRewardClicked(): void {
     if (!this._doubleRewardEnabled) return;
     if (this._onDoubleReward) {
@@ -167,6 +200,19 @@ export class GameOverScreen extends Component {
     }
   }
 
+  setGarageNotifyVisible(visible: boolean): void {
+    this._ensureGarageNotifyRefs();
+    const shouldShow = visible && !!this._onGarage && !!this.garageButton?.node.active;
+    if (this.garageNotifyNode) {
+      this.garageNotifyNode.active = shouldShow;
+    }
+    if (shouldShow) {
+      this._startGarageNotifyPulse();
+    } else {
+      this._stopGarageNotifyPulse();
+    }
+  }
+
   showDoubleRewardClaimed(coins: number, parts: number): void {
     const fromCoins = this._displayedRewardCoins;
     const fromParts = this._displayedRewardParts;
@@ -178,6 +224,7 @@ export class GameOverScreen extends Component {
   }
 
   hide(): void {
+    this._stopGarageNotifyPulse();
     this._playHideAnimation();
   }
 
@@ -400,6 +447,10 @@ export class GameOverScreen extends Component {
     if (!this.restartButton) {
       this.restartButton = bg?.getChildByName('RestartBtn')?.getComponent(Button) || null;
     }
+    if (!this.garageButton) {
+      this.garageButton = bg?.getChildByName('GarageBtn')?.getComponent(Button) || null;
+    }
+    this._ensureGarageNotifyRefs();
     if (!this.doubleRewardButton) {
       this.doubleRewardButton = bg?.getChildByName('DoubleRewardBtn')?.getComponent(Button) || null;
     }
@@ -520,6 +571,7 @@ export class GameOverScreen extends Component {
       this.rewardLabel?.node,
       this.doubleRewardButton?.node?.active ? this.doubleRewardButton.node : null,
       this._bgNode?.getChildByName('MenuBtn') || null,
+      this.garageButton?.node?.active ? this.garageButton.node : null,
       this.restartButton?.node?.active ? this.restartButton.node : null,
     ].filter((node): node is Node => Boolean(node && node.isValid));
   }
@@ -560,5 +612,36 @@ export class GameOverScreen extends Component {
 
   private _ensureOpacity(node: Node): UIOpacity {
     return node.getComponent(UIOpacity) || node.addComponent(UIOpacity);
+  }
+
+  private _ensureGarageNotifyRefs(): void {
+    if (!this.garageNotifyNode) {
+      this.garageNotifyNode = this.node
+        .getChildByName('Bg')
+        ?.getChildByName('GarageBtn')
+        ?.getChildByName('UpgradeDot') || null;
+    }
+  }
+
+  private _refreshGarageNotifyPulse(): void {
+    this._ensureGarageNotifyRefs();
+    const pulse = this.garageNotifyNode?.getComponent(GarageNotifyPulse) || null;
+    if (this.garageNotifyNode?.active) {
+      pulse?.play();
+      return;
+    }
+    pulse?.stop();
+  }
+
+  private _startGarageNotifyPulse(): void {
+    this._ensureGarageNotifyRefs();
+    if (!this.garageNotifyNode?.isValid || !this.garageNotifyNode.active) return;
+    this.garageNotifyNode.getComponent(GarageNotifyPulse)?.play();
+  }
+
+  private _stopGarageNotifyPulse(): void {
+    this._ensureGarageNotifyRefs();
+    if (!this.garageNotifyNode?.isValid) return;
+    this.garageNotifyNode.getComponent(GarageNotifyPulse)?.stop();
   }
 }

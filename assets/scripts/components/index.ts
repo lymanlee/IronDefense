@@ -7,3 +7,4 @@ export * from './Enemy';
 export * from './Bullet';
 export * from './WeaponTierSystem';
 export * from './SupplyChest';
+export * from './GarageNotifyPulse';
