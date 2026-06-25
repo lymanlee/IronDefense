@@ -2,7 +2,9 @@
   "name": "FirstGame",
   "uuid": "2bd7bf3d-6078-49f9-9e39-35d97c682293",
   "scripts": {
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "mcp:status": "node tools/cocos_mcp_client.js status",
+    "mcp:scene-status": "node tools/cocos_mcp_client.js scene-status"
   },
   "creator": {
     "version": "3.8.8"

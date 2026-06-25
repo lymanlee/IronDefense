@@ -4,7 +4,7 @@
  */
 
 import { _decorator, Component, Node, instantiate, Prefab, tween, Vec3, Color, Tween, input, Input, KeyCode, director, Sprite, UIOpacity, UITransform, Graphics, Label, Button, SpriteFrame, Vec3 as CcVec3, view } from 'cc';
-import { GameConfig, PermanentUpgradeId, SupplyCardStar, SupplyCardType, SupplyChestConfigData, SupplyChestQuality, SupplyOptionData, WaveDefinitionData, WeaponEvolutionData, WeaponEvolutionId } from '../data/GameConfig';
+import { GameConfig, PermanentUpgradeId, SupplyCardStar, SupplyCardType, SupplyChestConfigData, SupplyChestQuality, SupplyChestQualityRuleData, SupplyConfigData, SupplyOptionData, SupplyStarRuleData, WaveData, WaveDefinitionData, WeaponBehavior, WeaponEvolutionData, WeaponEvolutionId } from '../data/GameConfig';
 import { WeaponTierSystem } from '../components/WeaponTierSystem';
 import { AttackTarget, PlayerCar } from '../components/PlayerCar';
 import { Enemy } from '../components/Enemy';
@@ -26,15 +26,63 @@ import { BundleLoader } from './BundleLoader';
 const { ccclass, property } = _decorator;
 
 type GameState = 'start' | 'debug' | 'playing' | 'paused' | 'gameover' | 'victory' | 'revive' | 'supply' | 'ad';
+type PreviewEnemyType = 'mixed' | 'normal' | 'shield' | 'runner' | 'suicide' | 'healer' | 'boss_bulldozer' | 'boss_commander';
 
 interface ChestSlotData {
   x: number;
   y: number;
 }
 
+type DamageNumberSource = WeaponBehavior | 'shockwave' | 'airstrike';
+
+interface DamageResult {
+  killed: boolean;
+  appliedDamage: number;
+}
+
+interface FloatingTextStyle {
+  width: number;
+  height: number;
+  fontSize: number;
+  lineHeight: number;
+  outlineWidth: number;
+  startOffsetY: number;
+  floatDistance: number;
+  duration: number;
+  startScale: number;
+  peakScale: number;
+  endScale: number;
+}
+
+interface FloatingTextEntry {
+  node: Node;
+  label: Label;
+  opacity: UIOpacity;
+  styleKey: string;
+  generation: number;
+  active: boolean;
+  isFinishing: boolean;
+  pendingReplay: {
+    x: number;
+    y: number;
+    text: string;
+    color: Color;
+    styleKey: string;
+    style: FloatingTextStyle;
+  } | null;
+}
+
+interface TargetFloatingTextBinding {
+  entry: FloatingTextEntry;
+  entryGeneration: number;
+  targetToken: number;
+  expireAt: number;
+}
+
 @ccclass('GameManager')
 export class GameManager extends Component {
   private static readonly MAX_ACTIVE_EXPLOSIONS = 14;
+  private static readonly MAX_ACTIVE_FLOATING_TEXTS = 50;
   private static readonly AIRSTRIKE_HIT_FX_LIMIT = 8;
   private static readonly AIRSTRIKE_EXPLOSION_FX_LIMIT = 5;
   private static readonly AIRSTRIKE_DAMAGE_DELAY = 0.56;
@@ -106,6 +154,10 @@ export class GameManager extends Component {
   private _trails: TrailVisualData[] = [];
   private _lightnings: LightningVisualData[] = [];
   private _fragments: FragmentVisualData[] = [];
+  private _floatingTextPool: FloatingTextEntry[] = [];
+  private _activeFloatingTexts: FloatingTextEntry[] = [];
+  private _enemyDamageTextBindings: WeakMap<Enemy, TargetFloatingTextBinding> = new WeakMap();
+  private _chestDamageTextBindings: WeakMap<SupplyChest, TargetFloatingTextBinding> = new WeakMap();
   private _areaExplosionFrame: SpriteFrame | null = null;
   private _suppressEnemyKillFx: number = 0;
   private _enemyRenderOrderTimer: number = 0;
@@ -129,12 +181,16 @@ export class GameManager extends Component {
   private _bonusAdSupplyCount: number = 0;
   private _projectileSpeedMultiplier: number = 1;
   private _weaponEvolutionId: WeaponEvolutionId | null = null;
+  private _previewEnemyType: PreviewEnemyType = 'mixed';
+  private _isPreviewMode: boolean = false;
+  private _previewMovementLocked: boolean = false;
   private _enemySkillIds: WeakMap<Enemy, string> = new WeakMap();
   private _enemySkillSeq: number = 0;
 
   // 固定时间步长（避免帧率抖动导致子弹/敌人移动跳跃）
   private readonly _FIXED_DT: number = 1 / 60;  // 60Hz 固定步长
   private _accumulator: number = 0;
+  private _battleElapsed: number = 0;
 
   // UI 引用
   private _hud: HUDController | null = null;
@@ -204,7 +260,6 @@ export class GameManager extends Component {
 
     // 设置波次管理器工厂
     if (this._waveManager && this._enemyPool) {
-      this._waveManager.setDensityProvider((waveIndex) => this._getStageEnemyDensityMultiplier(waveIndex));
       this._waveManager.setEnemyFactory(() => {
         const enemy = this._enemyPool!.get();
         if (enemy) {
@@ -215,6 +270,11 @@ export class GameManager extends Component {
         }
         return enemy;
       });
+      this._waveManager.setWaveStatScaleProvider((waveIndex) => ({
+        hp: this._getStageEnemyHpScale(waveIndex),
+        atk: this._getStageEnemyAtkScale(waveIndex),
+        speed: this._getStageEnemySpeedScale(waveIndex),
+      }));
     }
 
     // 绑定武装车回调
@@ -269,9 +329,9 @@ export class GameManager extends Component {
         this._debugScreenNode.active = false;
         this._debugScreen = this._debugScreenNode.getComponent(DebugScreen);
         if (this._debugScreen) {
-          this._debugScreen.setOnConfirm((wave, tier, evolution) => {
-            console.log('[GameManager] 调试模式开始，波次:', wave, '武器档位:', tier, '分支:', evolution);
-            this.startGame(wave, tier, evolution);
+          this._debugScreen.setOnConfirm((wave, tier, evolution, enemyType) => {
+            console.log('[GameManager] 调试模式开始，波次:', wave, '武器档位:', tier, '分支:', evolution, '敌军类型:', enemyType);
+            this.startGame(wave, tier, evolution, enemyType);
           });
           this._debugScreen.setOnBack(() => {
             console.log('[GameManager] 返回开始界面');
@@ -496,6 +556,8 @@ export class GameManager extends Component {
       [['Canvas', 'Overlay', 'DebugScreen', 'ConfirmBtn'], 'ui/common/btn-secondary-v1/spriteFrame'],
       [['Canvas', 'Overlay', 'DebugScreen', 'LevelMinusBtn'], 'ui/common/btn-arrow-v1/spriteFrame'],
       [['Canvas', 'Overlay', 'DebugScreen', 'LevelPlusBtn'], 'ui/common/btn-arrow-v1/spriteFrame'],
+      [['Canvas', 'Overlay', 'DebugScreen', 'EnemyTypePrevBtn'], 'ui/common/btn-arrow-v1/spriteFrame'],
+      [['Canvas', 'Overlay', 'DebugScreen', 'EnemyTypeNextBtn'], 'ui/common/btn-arrow-v1/spriteFrame'],
       [['Canvas', 'Overlay', 'DebugScreen', 'ResetProgressBtn'], 'ui/common/btn-secondary-v1/spriteFrame'],
       [['Canvas', 'Overlay', 'DebugScreen', 'WaveMinusBtn'], 'ui/common/btn-arrow-v1/spriteFrame'],
       [['Canvas', 'Overlay', 'DebugScreen', 'WavePlusBtn'], 'ui/common/btn-arrow-v1/spriteFrame'],
@@ -588,6 +650,7 @@ export class GameManager extends Component {
 
   private _updatePlaying(dt: number): void {
     if (!this._waveManager || !this._playerCar || !this._weaponTierSystem) return;
+    this._battleElapsed += dt;
 
     // 更新屏幕闪红效果
     this._updateDamageFlash(dt);
@@ -604,7 +667,7 @@ export class GameManager extends Component {
     if (!this._battleFrozen) {
       this._supplyChests.forEach(activeChest => activeChest.updateChest(dt));
       this._updateChestSpawn(dt, enemies);
-      enemies.forEach(e => e.tick(dt));
+      enemies.forEach(e => e.tick(dt, this._previewMovementLocked));
       this._applyPendingWaveOpeningEffects(enemies);
       this._updateSpecialEnemies(enemies, dt);
     }
@@ -822,7 +885,15 @@ export class GameManager extends Component {
 
   private _handleBulletHitChest(bullet: Bullet, chest: SupplyChest): void {
     this._spawnBulletImpactFx(bullet, chest.x, chest.y, 'chest');
+    const prevHp = chest.hp;
     const destroyed = chest.takeDamage(bullet.damage);
+    const appliedDamage = Math.max(0, prevHp - chest.hp);
+    if (appliedDamage > 0 && !destroyed) {
+      this._showChestDamageNumber(chest, chest.x, chest.y + 24, appliedDamage, this._getDamageNumberColor(bullet.behavior));
+    }
+    if (destroyed) {
+      this._clearTargetDamageBinding(this._chestDamageTextBindings, chest);
+    }
     const canContinue = bullet.behavior === 'pierce' && bullet.consumePierce();
     if (bullet.behavior === 'pierce') {
       this._spawnTrail(bullet.x, bullet.y, bullet.x, bullet.y + 34, '#ffe082', 0.1, 2.2);
@@ -838,22 +909,26 @@ export class GameManager extends Component {
 
   private _handleBulletHit(bullet: Bullet, enemy: Enemy): void {
     this._spawnBulletImpactFx(bullet, enemy.x, enemy.y, 'enemy');
-    this._damageEnemy(enemy, bullet.damage);
+    this._damageEnemy(enemy, bullet.damage, bullet.behavior);
     if (bullet.behavior === 'explode' && bullet.explodeRadius > 0) {
       this._applyExplosionDamage(
         enemy,
         bullet.explodeRadius,
-        Math.max(1, Math.round(bullet.damage * Math.max(0.1, bullet.splashMultiplier)))
+        Math.max(1, Math.round(bullet.damage * Math.max(0.1, bullet.splashMultiplier))),
+        bullet.behavior
       );
-      this._spawnPulse(enemy.x, enemy.y, bullet.explodeRadius * 0.72, '#ffb74d', 0.22);
-      this._spawnBurstRing(enemy.x, enemy.y, bullet.explodeRadius * 0.82, '#ff8f00');
-      this._showFloatingNotice(enemy.x, enemy.y + 24, '爆裂', new Color(255, 196, 120));
+      this._playExplodeProcFx(enemy.x, enemy.y, bullet.explodeRadius);
     }
     if (bullet.behavior === 'chain' && bullet.chainCount > 0 && bullet.chainRange > 0) {
-      const chained = this._applyChainDamage(enemy, bullet.chainCount, bullet.chainRange, Math.max(1, Math.round(bullet.damage * Math.max(0.1, bullet.chainMultiplier))));
+      const chained = this._applyChainDamage(
+        enemy,
+        bullet.chainCount,
+        bullet.chainRange,
+        Math.max(1, Math.round(bullet.damage * Math.max(0.1, bullet.chainMultiplier))),
+        bullet.behavior
+      );
       if (chained > 0) {
-        this._spawnPulse(enemy.x, enemy.y, Math.max(60, bullet.chainRange * 0.5), '#ce93d8', 0.2);
-        this._showFloatingNotice(enemy.x, enemy.y + 24, '电弧', new Color(220, 180, 255));
+        this._playChainProcFx(enemy.x, enemy.y, Math.max(60, bullet.chainRange * 0.5), chained);
       }
     }
 
@@ -867,28 +942,43 @@ export class GameManager extends Component {
     }
   }
 
-  private _damageEnemy(enemy: Enemy, damage: number): boolean {
-    if (enemy.dead) return false;
-    enemy.takeDamage(damage);
+  private _damageEnemy(enemy: Enemy, damage: number, source: DamageNumberSource = 'normal'): DamageResult {
     if (enemy.dead) {
-      this._handleEnemyKilled(enemy);
-      return true;
+      return { killed: false, appliedDamage: 0 };
     }
-    return false;
+    const prevHp = enemy.hp;
+    enemy.takeDamage(damage);
+    const appliedDamage = Math.max(0, prevHp - enemy.hp);
+    if (enemy.dead) {
+      this._clearTargetDamageBinding(this._enemyDamageTextBindings, enemy);
+      this._showKillValueNumber(enemy.x, enemy.y + 18, enemy.maxHp);
+      this._handleEnemyKilled(enemy);
+      return { killed: true, appliedDamage };
+    }
+    if (appliedDamage > 0) {
+      this._showEnemyDamageNumber(enemy, enemy.x, enemy.y + 10, appliedDamage, this._getDamageNumberColor(source));
+    }
+    return { killed: false, appliedDamage };
   }
 
-  private _applyExplosionDamage(centerEnemy: Enemy, radius: number, damage: number): void {
+  private _applyExplosionDamage(centerEnemy: Enemy, radius: number, damage: number, source: DamageNumberSource): void {
     const radiusSq = radius * radius;
     for (const enemy of this._enemies) {
       if (enemy.dead || enemy === centerEnemy) continue;
       const dx = enemy.x - centerEnemy.x;
       const dy = enemy.y - centerEnemy.y;
       if (dx * dx + dy * dy > radiusSq) continue;
-      this._damageEnemy(enemy, damage);
+      this._damageEnemy(enemy, damage, source);
     }
   }
 
-  private _applyChainDamage(sourceEnemy: Enemy, chainCount: number, chainRange: number, damage: number): number {
+  private _applyChainDamage(
+    sourceEnemy: Enemy,
+    chainCount: number,
+    chainRange: number,
+    damage: number,
+    source: DamageNumberSource
+  ): number {
     const hit = new Set<Enemy>([sourceEnemy]);
     let current = sourceEnemy;
     let chained = 0;
@@ -897,7 +987,7 @@ export class GameManager extends Component {
       if (!next) break;
       hit.add(next);
       this._spawnLightning(current.x, current.y, next.x, next.y, '#d6b3ff', 0.12, 3);
-      this._damageEnemy(next, damage);
+      this._damageEnemy(next, damage, source);
       current = next;
       chained++;
     }
@@ -964,7 +1054,6 @@ export class GameManager extends Component {
     }
     if (healed > 0) {
       this._spawnPulse(enemy.x, enemy.y, Math.max(60, enemy.healRange * 0.55), '#6bffb0', 0.45);
-      this._showFloatingNotice(enemy.x, enemy.y + 34, '治疗脉冲', new Color(120, 255, 190));
     }
   }
 
@@ -980,7 +1069,6 @@ export class GameManager extends Component {
 
     this._waveSupportTimers.set(key, 0);
     this._spawnPulse(enemy.x, enemy.y, 95, '#ffb347', 0.4);
-    this._showFloatingNotice(enemy.x, enemy.y + 40, '冲锋增援', new Color(255, 210, 120));
     for (let i = 0; i < 3; i++) {
       this._spawnSupportEnemy('runner', enemy.x + (i - 1) * 36, enemy.y + 40);
     }
@@ -994,7 +1082,6 @@ export class GameManager extends Component {
     if (timer >= 5) {
       this._waveSupportTimers.set(key, 0);
       this._spawnPulse(enemy.x, enemy.y, 150, '#c084fc', 0.5);
-      this._showFloatingNotice(enemy.x, enemy.y + 42, '全军加速', new Color(220, 180, 255));
       enemies.forEach(target => {
         if (target.dead || target === enemy) return;
         const dx = target.x - enemy.x;
@@ -1009,7 +1096,6 @@ export class GameManager extends Component {
     if (!enemy.phaseTriggered && enemy.hpRatio <= 0.5) {
       enemy.markPhaseTriggered();
       this._spawnPulse(enemy.x, enemy.y, 180, '#ff80ab', 0.6);
-      this._showFloatingNotice(enemy.x, enemy.y + 52, '援军到场', new Color(255, 170, 210));
       this._spawnCommanderReinforcements(enemy);
     }
   }
@@ -1184,6 +1270,38 @@ export class GameManager extends Component {
     }
   }
 
+  private _playExplodeProcFx(x: number, y: number, radius: number): void {
+    const pulseRadius = Math.max(54, radius * 0.72);
+    this._spawnPulse(x, y, pulseRadius, '#ffb74d', 0.22);
+    this._spawnPulse(x, y, pulseRadius * 0.58, '#ffe0a3', 0.16);
+    this._spawnBurstRing(x, y, Math.max(68, radius * 0.82), '#ff8f00');
+
+    const streakCount = 6;
+    for (let i = 0; i < streakCount; i++) {
+      const angle = (Math.PI * 2 * i) / streakCount + Math.random() * 0.18;
+      const streakRadius = Math.max(34, radius * (0.36 + Math.random() * 0.16));
+      const x2 = x + Math.cos(angle) * streakRadius;
+      const y2 = y + Math.sin(angle) * streakRadius;
+      this._spawnTrail(x, y, x2, y2, i % 2 === 0 ? '#ffd180' : '#ffb74d', 0.12 + Math.random() * 0.05, 2.4 + Math.random() * 0.8);
+    }
+  }
+
+  private _playChainProcFx(x: number, y: number, radius: number, chainedCount: number): void {
+    const pulseRadius = Math.max(56, radius);
+    this._spawnPulse(x, y, pulseRadius, '#ce93d8', 0.2);
+    this._spawnPulse(x, y, pulseRadius * 0.52, '#f3e5ff', 0.13);
+
+    const spokeCount = Math.min(6, Math.max(3, chainedCount + 2));
+    for (let i = 0; i < spokeCount; i++) {
+      const angle = (Math.PI * 2 * i) / spokeCount + Math.random() * 0.28;
+      const length = Math.max(28, radius * (0.26 + Math.random() * 0.12));
+      const x2 = x + Math.cos(angle) * length;
+      const y2 = y + Math.sin(angle) * length;
+      this._spawnLightning(x, y, x2, y2, i % 2 === 0 ? '#d6b3ff' : '#9fe7ff', 0.08 + Math.random() * 0.03, 2.2);
+      this._spawnTrail(x, y, x2, y2, '#e9d5ff', 0.08, 1.4);
+    }
+  }
+
   private _spawnFragment(
     x: number,
     y: number,
@@ -1214,33 +1332,410 @@ export class GameManager extends Component {
   }
 
   private _showFloatingNotice(x: number, y: number, text: string, color: Color): void {
-    const parent = this.explosionGraphicsNode?.parent;
-    if (!parent) return;
+    this._playFloatingText(x, y, text, color, 'notice', {
+      width: 220,
+      height: 42,
+      fontSize: 22,
+      lineHeight: 28,
+      outlineWidth: 2,
+      startOffsetY: 0,
+      floatDistance: 72,
+      duration: 0.85,
+      startScale: 1,
+      peakScale: 1,
+      endScale: 1,
+    });
+  }
 
-    const node = new Node(`Notice_${text}`);
+  private _showDamageNumber(
+    x: number,
+    y: number,
+    value: number,
+    color: Color
+  ): void {
+    if (value <= 0) return;
+    this._playFloatingText(
+      x + (Math.random() - 0.5) * 10,
+      y + Math.random() * 6,
+      `${Math.max(1, Math.round(value))}`,
+      color,
+      'damage',
+      {
+        width: 116,
+        height: 30,
+        fontSize: 18,
+        lineHeight: 22,
+        outlineWidth: 2,
+        startOffsetY: 16,
+        floatDistance: 50,
+        duration: 0.4,
+        startScale: 0.94,
+        peakScale: 1.02,
+        endScale: 0.96,
+      }
+    );
+  }
+
+  private _showEnemyDamageNumber(enemy: Enemy, x: number, y: number, value: number, color: Color): void {
+    this._showTargetBoundDamageNumber(
+      this._enemyDamageTextBindings,
+      enemy,
+      enemy.spawnToken,
+      x,
+      y,
+      value,
+      color,
+      0.1
+    );
+  }
+
+  private _showChestDamageNumber(chest: SupplyChest, x: number, y: number, value: number, color: Color): void {
+    this._showTargetBoundDamageNumber(
+      this._chestDamageTextBindings,
+      chest,
+      chest.serial,
+      x,
+      y,
+      value,
+      color,
+      0.12
+    );
+  }
+
+  private _showKillValueNumber(x: number, y: number, value: number): void {
+    if (value <= 0) return;
+    this._playFloatingText(
+      x + (Math.random() - 0.5) * 12,
+      y + Math.random() * 8,
+      `${Math.max(1, Math.round(value))}`,
+      new Color(255, 214, 120, 255),
+      'kill',
+      {
+        width: 156,
+        height: 42,
+        fontSize: 28,
+        lineHeight: 32,
+        outlineWidth: 3,
+        startOffsetY: 22,
+        floatDistance: 74,
+        duration: 0.62,
+        startScale: 0.92,
+        peakScale: 1.08,
+        endScale: 0.98,
+      }
+    );
+  }
+
+  private _showTargetBoundDamageNumber<T extends object>(
+    bindings: WeakMap<T, TargetFloatingTextBinding>,
+    target: T,
+    targetToken: number,
+    x: number,
+    y: number,
+    value: number,
+    color: Color,
+    reuseWindow: number
+  ): void {
+    if (value <= 0) return;
+
+    const existing = bindings.get(target);
+    const canReuse = !!existing
+      && existing.entry.active
+      && existing.entry.generation === existing.entryGeneration
+      && existing.targetToken === targetToken
+      && this._battleElapsed <= existing.expireAt;
+
+    if (canReuse && existing) {
+      existing.expireAt = this._battleElapsed + reuseWindow;
+      this._queueFloatingTextReplay(
+        existing.entry,
+        x + (Math.random() - 0.5) * 10,
+        y + Math.random() * 6,
+        `${Math.max(1, Math.round(value))}`,
+        color,
+        'damage',
+        {
+          width: 116,
+          height: 30,
+          fontSize: 18,
+          lineHeight: 22,
+          outlineWidth: 2,
+          startOffsetY: 16,
+          floatDistance: 50,
+          duration: 0.4,
+          startScale: 0.94,
+          peakScale: 1.02,
+          endScale: 0.96,
+        }
+      );
+      return;
+    }
+
+    const entry = this._playFloatingText(
+      x + (Math.random() - 0.5) * 10,
+      y + Math.random() * 6,
+      `${Math.max(1, Math.round(value))}`,
+      color,
+      'damage',
+      {
+        width: 116,
+        height: 30,
+        fontSize: 18,
+        lineHeight: 22,
+        outlineWidth: 2,
+        startOffsetY: 16,
+        floatDistance: 50,
+        duration: 0.4,
+        startScale: 0.94,
+        peakScale: 1.02,
+        endScale: 0.96,
+      }
+    );
+    if (!entry) return;
+
+    bindings.set(target, {
+      entry,
+      entryGeneration: entry.generation,
+      targetToken,
+      expireAt: this._battleElapsed + reuseWindow,
+    });
+  }
+
+  private _playFloatingText(
+    x: number,
+    y: number,
+    text: string,
+    color: Color,
+    styleKey: string,
+    style: FloatingTextStyle
+  ): FloatingTextEntry | null {
+    const parent = this.explosionGraphicsNode?.parent;
+    if (!parent || !text) return null;
+    const entry = this._acquireFloatingText(parent, styleKey, style);
+    if (!entry) return null;
+
+    this._replayFloatingText(entry, x, y, text, color, styleKey, style);
+    return entry;
+  }
+
+  private _queueFloatingTextReplay(
+    entry: FloatingTextEntry,
+    x: number,
+    y: number,
+    text: string,
+    color: Color,
+    styleKey: string,
+    style: FloatingTextStyle
+  ): void {
+    entry.pendingReplay = {
+      x,
+      y,
+      text,
+      color: color.clone(),
+      styleKey,
+      style,
+    };
+
+    if (entry.isFinishing) {
+      return;
+    }
+    entry.isFinishing = true;
+
+    Tween.stopAllByTarget(entry.node);
+    Tween.stopAllByTarget(entry.opacity);
+
+    const currentPosition = entry.node.getPosition();
+    const fastFinishDuration = 0.14;
+    const fastEndY = currentPosition.y + Math.max(12, style.floatDistance * 0.24);
+
+    tween(entry.node)
+      .parallel(
+        tween().to(fastFinishDuration, { position: new Vec3(currentPosition.x, fastEndY, 0) }),
+        tween().to(fastFinishDuration, { scale: new Vec3(style.endScale, style.endScale, 1) }),
+        tween(entry.opacity).to(fastFinishDuration, { opacity: 0 })
+      )
+      .call(() => {
+        if (!entry.active) return;
+        entry.isFinishing = false;
+        const replay = entry.pendingReplay;
+        entry.pendingReplay = null;
+        if (!replay) return;
+        this._replayFloatingText(
+          entry,
+          replay.x,
+          replay.y,
+          replay.text,
+          replay.color,
+          replay.styleKey,
+          replay.style
+        );
+      })
+      .start();
+  }
+
+  private _replayFloatingText(
+    entry: FloatingTextEntry,
+    x: number,
+    y: number,
+    text: string,
+    color: Color,
+    styleKey: string,
+    style: FloatingTextStyle
+  ): void {
+    this._applyFloatingTextStyle(entry, styleKey, style);
+    const startY = y + style.startOffsetY;
+    entry.node.name = `${styleKey}_${text}`;
+    entry.node.setPosition(x, startY, 0);
+    entry.node.setScale(style.startScale, style.startScale, 1);
+    entry.label.string = text;
+    entry.label.color = color.clone();
+    entry.opacity.opacity = 255;
+
+    Tween.stopAllByTarget(entry.node);
+    Tween.stopAllByTarget(entry.opacity);
+
+    tween(entry.node)
+      .parallel(
+        tween().to(style.duration, { position: new Vec3(x, startY + style.floatDistance, 0) }),
+        tween().to(style.duration * 0.28, {
+          scale: new Vec3(style.peakScale, style.peakScale, 1),
+        }).to(style.duration * 0.72, {
+          scale: new Vec3(style.endScale, style.endScale, 1),
+        }),
+        tween(entry.opacity).to(style.duration, { opacity: 0 })
+      )
+      .call(() => this._releaseFloatingText(entry))
+      .start();
+  }
+
+  private _acquireFloatingText(
+    parent: Node,
+    styleKey: string,
+    style: FloatingTextStyle
+  ): FloatingTextEntry | null {
+    let entry = this._floatingTextPool.pop();
+    if (!entry) {
+      if (this._activeFloatingTexts.length >= GameManager.MAX_ACTIVE_FLOATING_TEXTS) {
+        this._releaseFloatingText(this._activeFloatingTexts[0]);
+      }
+      if (this._activeFloatingTexts.length >= GameManager.MAX_ACTIVE_FLOATING_TEXTS) {
+        return null;
+      }
+      entry = this._createFloatingTextEntry(parent);
+    }
+
+    if (!entry.node.parent) {
+      parent.addChild(entry.node);
+    } else if (entry.node.parent !== parent) {
+      entry.node.removeFromParent();
+      parent.addChild(entry.node);
+    }
+
+    this._applyFloatingTextStyle(entry, styleKey, style);
+    entry.node.active = true;
+    entry.generation += 1;
+    entry.active = true;
+    this._activeFloatingTexts.push(entry);
+    return entry;
+  }
+
+  private _createFloatingTextEntry(parent: Node): FloatingTextEntry {
+    const node = new Node('FloatingText');
     const transform = node.addComponent(UITransform);
-    transform.setContentSize(220, 42);
-    node.setPosition(x, y, 0);
+    transform.setContentSize(128, 32);
 
     const label = node.addComponent(Label);
-    label.string = text;
-    label.fontSize = 22;
-    label.lineHeight = 28;
     label.horizontalAlign = Label.HorizontalAlign.CENTER;
     label.verticalAlign = Label.VerticalAlign.CENTER;
-    label.color = color.clone();
+    label.isBold = true;
+    label.enableOutline = true;
+    label.outlineColor = new Color(16, 18, 24, 220);
+    label.outlineWidth = 2;
 
     const opacity = node.addComponent(UIOpacity);
     opacity.opacity = 255;
-    parent.addChild(node);
 
-    tween(node)
-      .parallel(
-        tween().to(0.85, { position: new Vec3(x, y + 72, 0) }),
-        tween(opacity).to(0.85, { opacity: 0 })
-      )
-      .call(() => node.destroy())
-      .start();
+    parent.addChild(node);
+    node.active = false;
+
+    return {
+      node,
+      label,
+      opacity,
+      styleKey: '',
+      generation: 0,
+      active: false,
+      isFinishing: false,
+      pendingReplay: null,
+    };
+  }
+
+  private _applyFloatingTextStyle(entry: FloatingTextEntry, styleKey: string, style: FloatingTextStyle): void {
+    entry.styleKey = styleKey;
+    const transform = entry.node.getComponent(UITransform);
+    transform?.setContentSize(style.width, style.height);
+    entry.label.fontSize = style.fontSize;
+    entry.label.lineHeight = style.lineHeight;
+    entry.label.outlineWidth = style.outlineWidth;
+  }
+
+  private _releaseFloatingText(entry: FloatingTextEntry): void {
+    if (!entry.active) return;
+    entry.active = false;
+    entry.isFinishing = false;
+    entry.pendingReplay = null;
+    entry.styleKey = '';
+    Tween.stopAllByTarget(entry.node);
+    Tween.stopAllByTarget(entry.opacity);
+    entry.node.active = false;
+    entry.opacity.opacity = 255;
+
+    const idx = this._activeFloatingTexts.indexOf(entry);
+    if (idx !== -1) {
+      const last = this._activeFloatingTexts.length - 1;
+      if (idx !== last) {
+        this._activeFloatingTexts[idx] = this._activeFloatingTexts[last];
+      }
+      this._activeFloatingTexts.pop();
+    }
+    this._floatingTextPool.push(entry);
+  }
+
+  private _clearFloatingTexts(): void {
+    while (this._activeFloatingTexts.length > 0) {
+      this._releaseFloatingText(this._activeFloatingTexts[this._activeFloatingTexts.length - 1]);
+    }
+    this._enemyDamageTextBindings = new WeakMap();
+    this._chestDamageTextBindings = new WeakMap();
+  }
+
+  private _clearTargetDamageBinding<T extends object>(
+    bindings: WeakMap<T, TargetFloatingTextBinding>,
+    target: T
+  ): void {
+    const binding = bindings.get(target);
+    if (!binding) return;
+    if (binding.entry.active) {
+      this._releaseFloatingText(binding.entry);
+    }
+    bindings.delete(target);
+  }
+
+  private _getDamageNumberColor(source: DamageNumberSource): Color {
+    switch (source) {
+      case 'explode':
+      case 'airstrike':
+        return new Color(255, 172, 88, 255);
+      case 'chain':
+        return new Color(196, 182, 255, 255);
+      case 'pierce':
+        return new Color(128, 224, 255, 255);
+      case 'shockwave':
+        return new Color(255, 224, 148, 255);
+      case 'normal':
+      default:
+        return new Color(255, 240, 186, 255);
+    }
   }
 
   private _generateExplosionParticles(x: number, y: number): ExplosionParticle[] {
@@ -1745,11 +2240,13 @@ export class GameManager extends Component {
   }
 
   private _pickSupplyOptions(chestQuality: SupplyChestQuality = 'normal', chestSerial: number = 0): SupplyOptionData[] {
-    const desiredCount = Math.max(1, GameConfig.gameplay.supply.choiceCount + this._bonusSupplyChoices);
+    const desiredCount = Math.max(1, this._getSupplyConfig().choiceCount + this._bonusSupplyChoices);
     const maxAllowedStar = this._getMaxSupplyStarForChestQuality(chestQuality);
-    const options = [...(GameConfig.gameplay.supply.options as SupplyOptionData[])]
+    const options = [...this._getSupplyConfig().options]
       .filter(option => option.star <= maxAllowedStar && this._canOfferSupplyOption(option));
-    if (chestSerial >= 2 && !this._weaponEvolutionId) {
+    const minChestSerialToOffer = Math.max(0, Math.floor(GameConfig.gameplay.weaponEvolution.minChestSerialToOffer || 0));
+    const canOfferEvolution = !!this._weaponTierSystem?.canOfferEvolution;
+    if (chestSerial >= minChestSerialToOffer && canOfferEvolution && !this._weaponEvolutionId) {
       options.push(
         ...(GameConfig.gameplay.weaponEvolution.options as SupplyOptionData[])
           .filter(option => option.star <= maxAllowedStar && this._canOfferSupplyOption(option))
@@ -1953,21 +2450,25 @@ export class GameManager extends Component {
     return Math.max(0, GameConfig.gameplay.supply.maxAdExtrasPerRun + this._bonusAdSupplyCount - this._supplyAdExtrasUsed);
   }
 
+  private _getSupplyConfig(): SupplyConfigData {
+    return GameConfig.gameplay.supply as SupplyConfigData;
+  }
+
+  private _getSupplyStarRule(chestQuality: SupplyChestQuality): SupplyStarRuleData {
+    const rules = this._getSupplyConfig().starRules;
+    return rules[chestQuality] || rules.normal;
+  }
+
   private _getSupplyStarsForChestQuality(
     chestQuality: SupplyChestQuality,
     chestSerial: number,
     desiredCount: number,
     supplyTier: number
   ): SupplyCardStar[] {
-    const guaranteeStarMap: Partial<Record<SupplyChestQuality, SupplyCardStar>> = {
-      elite: 3,
-      rare: 4,
-      legendary: 5,
-    };
-
-    const maxStar = this._getMaxSupplyStarForChestQuality(chestQuality);
+    const starRule = this._getSupplyStarRule(chestQuality);
+    const maxStar = starRule.maxStar;
     const result: SupplyCardStar[] = [];
-    const guaranteedStar = guaranteeStarMap[chestQuality];
+    const guaranteedStar = starRule.guaranteedStar;
     if (guaranteedStar) {
       result.push(guaranteedStar);
     }
@@ -1981,13 +2482,7 @@ export class GameManager extends Component {
   }
 
   private _getMaxSupplyStarForChestQuality(chestQuality: SupplyChestQuality): SupplyCardStar {
-    const maxStarMap: Record<SupplyChestQuality, SupplyCardStar> = {
-      normal: 2,
-      elite: 3,
-      rare: 4,
-      legendary: 5,
-    };
-    return maxStarMap[chestQuality];
+    return this._getSupplyStarRule(chestQuality).maxStar;
   }
 
   private _rollSupplyStar(maxStar: SupplyCardStar, chestSerial: number, supplyTier: number): SupplyCardStar {
@@ -2050,7 +2545,7 @@ export class GameManager extends Component {
       onDamage: (enemy) => {
         enemy.pushBack(distance);
         if (damage > 0) {
-          this._damageEnemy(enemy, damage);
+          this._damageEnemy(enemy, damage, 'shockwave');
         }
       },
     });
@@ -2065,7 +2560,7 @@ export class GameManager extends Component {
       flashHex: '#ffe7b4',
       damageDelay: GameManager.AIRSTRIKE_DAMAGE_DELAY,
       onDamage: (enemy) => {
-        this._damageEnemy(enemy, Math.max(1, damage));
+        this._damageEnemy(enemy, Math.max(1, damage), 'airstrike');
       },
     });
   }
@@ -2416,9 +2911,9 @@ export class GameManager extends Component {
     const waveData = this._waveManager.getWaveData(Math.max(0, this._waveManager.waveIndex));
     const serial = this._chestSpawnSerial;
     const quality = this._pickChestQuality();
-    const hp = this._getSupplyChestHp(serial, waveData.hp);
+    const hp = this._getSupplyChestHp(serial, waveData.hp, quality);
     const slot = this._chestSlots[0];
-    chest.init(quality, slot.x, this._getChestSpawnY(), hp, cfg.radius, serial, cfg.speedMultiplier, 0, 0);
+    chest.init(quality, slot.x, this._getChestSpawnY(), hp, cfg.radius, serial, cfg.moveSpeed, 0, 0);
     chest.setTrackTarget(slot.x, slot.y);
     this._chestSpawnSerial++;
     this._reflowChestTrack();
@@ -2560,26 +3055,36 @@ export class GameManager extends Component {
   }
 
   private _pickChestQuality(): SupplyChestQuality {
-    if (!this._waveManager) return 'normal';
     const serial = this._chestSpawnSerial;
-    const bonusTier = this._progressManager.getPermanentBonuses().supplyQualityTier || 0;
+    const supplyTier = this._progressManager.getPermanentBonuses().supplyQualityTier || 0;
+    const rules = this._getSupplyChestConfig().qualityRules || [];
+    if (rules.length === 0) return 'normal';
 
-    if (serial <= 0) return 'normal';
-    if (serial === 1) {
-      return Math.random() < Math.min(0.78, 0.18 + bonusTier * 0.08) ? 'elite' : 'normal';
+    const rule = rules.find((item) => serial <= item.serialMax) || rules[rules.length - 1];
+    return this._rollChestQualityFromRule(rule, supplyTier);
+  }
+
+  private _rollChestQualityFromRule(rule: SupplyChestQualityRuleData, supplyTier: number): SupplyChestQuality {
+    const qualityOrder: SupplyChestQuality[] = ['normal', 'elite', 'rare', 'legendary'];
+    const weights = qualityOrder.map((quality) => {
+      const baseWeight = Math.max(0, rule.weights[quality] || 0);
+      if (quality === 'elite') return baseWeight * (1 + supplyTier * 0.08);
+      if (quality === 'rare') return baseWeight * (1 + supplyTier * 0.14);
+      if (quality === 'legendary') return baseWeight * (1 + supplyTier * 0.2);
+      return baseWeight;
+    });
+
+    const total = weights.reduce((sum, weight) => sum + weight, 0);
+    if (total <= 0) return 'normal';
+
+    let roll = Math.random() * total;
+    for (let i = 0; i < qualityOrder.length; i++) {
+      roll -= weights[i];
+      if (roll <= 0) {
+        return qualityOrder[i];
+      }
     }
-
-    const legendaryChance = serial >= 5
-      ? Math.min(0.18, 0.04 + (serial - 4) * 0.025 + bonusTier * 0.02)
-      : 0;
-    const rareChance = Math.min(0.34, 0.12 + Math.max(0, serial - 1) * 0.04 + bonusTier * 0.025);
-    const eliteChance = Math.min(0.62, 0.42 + serial * 0.03 + bonusTier * 0.03);
-    const roll = Math.random();
-
-    if (roll < legendaryChance) return 'legendary';
-    if (roll < legendaryChance + rareChance) return 'rare';
-    if (roll < legendaryChance + rareChance + eliteChance) return 'elite';
-    return 'normal';
+    return qualityOrder[qualityOrder.length - 1];
   }
 
   private _getChestQualityName(quality: SupplyChestQuality): string {
@@ -3037,7 +3542,12 @@ export class GameManager extends Component {
 
   // ==================== 状态切换 ====================
 
-  startGame(startWave?: number, startTier?: number, forcedEvolution?: WeaponEvolutionId | 'none'): void {
+  startGame(
+    startWave?: number,
+    startTier?: number,
+    forcedEvolution?: WeaponEvolutionId | 'none',
+    previewEnemyType: PreviewEnemyType = 'mixed'
+  ): void {
     const permanentBonuses = this._progressManager.getPermanentBonuses();
     this._runSerial++;
     this.unscheduleAllCallbacks();
@@ -3068,6 +3578,9 @@ export class GameManager extends Component {
     this._bonusPierceCount = 0;
     this._bonusChainCount = 0;
     this._bonusChainRangeMultiplier = 1;
+    this._previewEnemyType = previewEnemyType;
+    this._isPreviewMode = startWave === 0;
+    this._previewMovementLocked = false;
     this._weaponEvolutionId = forcedEvolution && forcedEvolution !== 'none' ? forcedEvolution : null;
     this._waveSupportTimers.clear();
     this._enemySkillIds = new WeakMap();
@@ -3128,9 +3641,14 @@ export class GameManager extends Component {
     // 清空对象池
     this._bulletPool?.putAll();
     this._enemyPool?.putAll();
+    this._clearFloatingTexts();
 
-    // 开始第一波
-    this._waveManager?.startWave();
+    if (startWave === 0) {
+      this._startEvolutionPreview(forcedEvolution, previewEnemyType);
+    } else {
+      // 开始第一波
+      this._waveManager?.startWave();
+    }
 
     // 播放 BGM（在用户点击"开始游戏"的同步调用栈中，iOS 要求首次音频在用户手势内）
     this._audioManager?.startBGM();
@@ -3142,6 +3660,135 @@ export class GameManager extends Component {
     if (this._gameOverScreen) this._gameOverScreen.node.active = false;
     if (this._hud) this._hud.node.active = true;
     this._refreshPauseButtonState();
+  }
+
+  private _startEvolutionPreview(forcedEvolution?: WeaponEvolutionId | 'none', previewEnemyType: PreviewEnemyType = 'mixed'): void {
+    if (!this._waveManager) return;
+    this._waveManager.waveIndex = 0;
+
+    const previewEvolution = forcedEvolution && forcedEvolution !== 'none' ? forcedEvolution : 'mg_explode';
+    this._weaponEvolutionId = previewEvolution;
+
+    const previewWave = this._waveManager.getWaveData(8);
+    const formations = previewEnemyType === 'mixed'
+      ? (previewEvolution === 'mg_arc'
+        ? this._buildArcPreviewFormation()
+        : this._buildExplodePreviewFormation())
+      : this._buildSingleTypePreviewFormation(previewEnemyType);
+
+    formations.forEach((item) => {
+      this._spawnPreviewEnemy(item.type, item.x, item.y, previewWave);
+    });
+  }
+
+  private _buildExplodePreviewFormation(): Array<{ type: 'normal' | 'shield' | 'boss_bulldozer'; x: number; y: number }> {
+    const formations: Array<{ type: 'normal' | 'shield' | 'boss_bulldozer'; x: number; y: number }> = [];
+    const columns = 6;
+    const rows = 6;
+    const minX = this._getPreviewEnemyMinX();
+    const maxX = GameConfig.bridge.right - 34;
+    const topY = GameConfig.bridge.battleTop - 118;
+    const bottomY = GameConfig.bridge.railY + 264;
+    const xStep = (maxX - minX) / (columns - 1);
+    const yStep = (topY - bottomY) / (rows - 1);
+
+    for (let row = 0; row < rows; row++) {
+      for (let col = 0; col < columns; col++) {
+        const centerBias = Math.abs(col - (columns - 1) / 2);
+        const isBossAnchor = row === 2 && (col === 2 || col === 3);
+        const type = isBossAnchor ? 'boss_bulldozer' : row >= 2 && centerBias <= 1 ? 'shield' : 'normal';
+        formations.push({
+          type,
+          x: minX + col * xStep + (row % 2 === 0 ? 0 : xStep * 0.14),
+          y: topY - row * yStep,
+        });
+      }
+    }
+    return formations;
+  }
+
+  private _buildArcPreviewFormation(): Array<{ type: 'normal' | 'shield' | 'boss_commander'; x: number; y: number }> {
+    const formations: Array<{ type: 'normal' | 'shield' | 'boss_commander'; x: number; y: number }> = [];
+    const columns = 5;
+    const rows = 6;
+    const minX = this._getPreviewEnemyMinX();
+    const maxX = GameConfig.bridge.right - 42;
+    const topY = GameConfig.bridge.battleTop - 108;
+    const bottomY = GameConfig.bridge.railY + 258;
+    const xStep = (maxX - minX) / (columns - 1);
+    const yStep = (topY - bottomY) / (rows - 1);
+
+    for (let row = 0; row < rows; row++) {
+      for (let col = 0; col < columns; col++) {
+        const isBossAnchor = row === 2 && col === 2;
+        formations.push({
+          type: isBossAnchor
+            ? 'boss_commander'
+            : (col === 2 && row >= 1 && row <= 4) || (row >= 2 && row <= 3 && col >= 1 && col <= 3)
+              ? 'shield'
+              : 'normal',
+          x: minX + col * xStep + (row % 2 === 0 ? 0 : xStep * 0.1),
+          y: topY - row * yStep,
+        });
+      }
+    }
+    return formations;
+  }
+
+  private _buildSingleTypePreviewFormation(
+    type: 'normal' | 'shield' | 'runner' | 'suicide' | 'healer' | 'boss_bulldozer' | 'boss_commander'
+  ): Array<{ type: 'normal' | 'shield' | 'runner' | 'suicide' | 'healer' | 'boss_bulldozer' | 'boss_commander'; x: number; y: number }> {
+    const formations: Array<{ type: 'normal' | 'shield' | 'runner' | 'suicide' | 'healer' | 'boss_bulldozer' | 'boss_commander'; x: number; y: number }> = [];
+    const isBoss = type === 'boss_bulldozer' || type === 'boss_commander';
+    const columns = isBoss ? 3 : 6;
+    const rows = isBoss ? 3 : 6;
+    const minX = this._getPreviewEnemyMinX();
+    const maxX = GameConfig.bridge.right - (isBoss ? 90 : 34);
+    const topY = GameConfig.bridge.battleTop - 118;
+    const bottomY = GameConfig.bridge.railY + (isBoss ? 300 : 264);
+    const xStep = columns > 1 ? (maxX - minX) / (columns - 1) : 0;
+    const yStep = rows > 1 ? (topY - bottomY) / (rows - 1) : 0;
+
+    for (let row = 0; row < rows; row++) {
+      for (let col = 0; col < columns; col++) {
+        formations.push({
+          type,
+          x: minX + col * xStep + (isBoss ? 0 : (row % 2 === 0 ? 0 : xStep * 0.12)),
+          y: topY - row * yStep,
+        });
+      }
+    }
+    return formations;
+  }
+
+  private _getPreviewEnemyMinX(): number {
+    const chestCfg = this._getSupplyChestConfig();
+    const laneCount = GameConfig.bridge.laneCount;
+    const laneWidth = (GameConfig.bridge.right - GameConfig.bridge.left) / laneCount;
+    const enemyStartLaneIndex = Math.max(0, Math.min(laneCount - 1, chestCfg.enemyStartLaneIndex ?? 1));
+    return GameConfig.bridge.left + enemyStartLaneIndex * laneWidth + 18;
+  }
+
+  private _spawnPreviewEnemy(
+    type: 'normal' | 'shield' | 'runner' | 'suicide' | 'healer' | 'boss_bulldozer' | 'boss_commander',
+    x: number,
+    y: number,
+    waveData: WaveData
+  ): void {
+    if (!this._enemyPool || !this.enemiesNode || !this._waveManager) return;
+
+    const enemy = this._enemyPool.get();
+    if (!enemy) return;
+    if (!enemy.node.parent) {
+      this.enemiesNode.addChild(enemy.node);
+    }
+
+    enemy.init(waveData, 1, 0, 0, 1, 1, x, type);
+    enemy.setWorldPosition(
+      Math.max(GameConfig.bridge.left + 24, Math.min(GameConfig.bridge.right - 24, x)),
+      Math.max(GameConfig.bridge.railY + 180, Math.min(GameConfig.bridge.battleTop - 80, y))
+    );
+    this._waveManager.enemies.push(enemy);
   }
 
   restart(): void {
@@ -3209,17 +3856,20 @@ export class GameManager extends Component {
   private _refreshPauseButtonState(): void {
     this._cachePauseButtonRefs();
     const visible = this._state === 'playing' || this._state === 'paused';
+    const previewMoveToggle = this._state === 'playing' && this._isPreviewMode;
     if (this._pauseButtonNode) {
       this._pauseButtonNode.active = visible;
     }
     if (this._pauseIconNode) {
-      this._pauseIconNode.active = this._state === 'playing';
+      this._pauseIconNode.active = previewMoveToggle ? !this._previewMovementLocked : this._state === 'playing';
     }
     if (this._playIconNode) {
-      this._playIconNode.active = this._state === 'paused';
+      this._playIconNode.active = previewMoveToggle ? this._previewMovementLocked : this._state === 'paused';
     }
     if (this._pauseButtonLabel) {
-      this._pauseButtonLabel.string = this._state === 'paused' ? '继续' : '暂停';
+      this._pauseButtonLabel.string = previewMoveToggle
+        ? (this._previewMovementLocked ? '敌军放行' : '敌军禁行')
+        : (this._state === 'paused' ? '继续' : '暂停');
     }
   }
 
@@ -3233,13 +3883,19 @@ export class GameManager extends Component {
       this._playerCar?.onTouchEnd();
     } else {
       if (this._state !== 'paused') return;
-      this._state = 'playing';
-      this._accumulator = 0;
+    this._state = 'playing';
+    this._accumulator = 0;
+    this._battleElapsed = 0;
     }
     this._refreshPauseButtonState();
   }
 
   onPauseToggleClicked(): void {
+    if (this._state === 'playing' && this._isPreviewMode) {
+      this._previewMovementLocked = !this._previewMovementLocked;
+      this._refreshPauseButtonState();
+      return;
+    }
     if (this._state === 'playing') {
       this._setPaused(true);
     } else if (this._state === 'paused') {
@@ -3298,11 +3954,10 @@ export class GameManager extends Component {
       for (const entry of waveDef.entries) {
         raw += entry.count;
       }
-      raw = Math.max(1, raw);
-      return Math.max(1, Math.round(raw * this._getStageEnemyDensityMultiplier(waveIndex)));
+      return Math.max(1, raw);
     }
     const waveData = this._waveManager?.getWaveData(waveIndex);
-    return Math.max(1, Math.round((waveData?.count || 1) * this._getStageEnemyDensityMultiplier(waveIndex)));
+    return Math.max(1, Math.round(waveData?.count || 1));
   }
 
   private _getStageKillProgressPct(stageIndex: number = this._stageManager.currentStageIndex): number {
@@ -3438,13 +4093,13 @@ export class GameManager extends Component {
     });
   }
 
-  private _getSupplyChestHp(serial: number, waveHp: number): number {
+  private _getSupplyChestHp(serial: number, waveHp: number, quality: SupplyChestQuality): number {
     const cfg = this._getSupplyChestConfig();
     const waveFactor = this._getStageChestHpMultiplier();
+    const qualityFactor = cfg.qualityHpMultiplier?.[quality] || 1;
     const serialGrowth = Math.max(0, cfg.serialGrowth || 0.09);
     const serialFactor = Math.pow(1 + serialGrowth, serial);
-    const positionFactor = 1.06;
-    return Math.max(50, Math.round(waveHp * (cfg.baseHpFactor || 4.8) * waveFactor * serialFactor * positionFactor));
+    return Math.max(50, Math.round(waveHp * (cfg.baseHpFactor || 4.8) * waveFactor * qualityFactor * serialFactor));
   }
 
   private _getEvolutionSynergyWeight(option: SupplyOptionData): number {
@@ -3480,7 +4135,9 @@ export class GameManager extends Component {
     waveCount: number;
     rewardBonus: { coins: number; parts: number };
     startWave?: number;
-    enemyDensityByWave?: number[];
+    enemyHpScaleByWave?: number[];
+    enemyAtkScaleByWave?: number[];
+    enemySpeedScaleByWave?: number[];
     chestHpMultiplierByWave?: number[];
   } | null {
     const stageDefs = this._getStageDefs() as Array<{
@@ -3489,24 +4146,39 @@ export class GameManager extends Component {
       waveCount: number;
       rewardBonus: { coins: number; parts: number };
       startWave?: number;
-      enemyDensityByWave?: number[];
+      enemyHpScaleByWave?: number[];
+      enemyAtkScaleByWave?: number[];
+      enemySpeedScaleByWave?: number[];
       chestHpMultiplierByWave?: number[];
     }>;
     return stageDefs[this._stageManager.currentStageIndex] || null;
   }
 
-  private _getStageEnemyDensityMultiplier(waveIndex: number = Math.max(0, (this._waveManager?.currentWaveNum || 1) - 1)): number {
+  private _getStageEnemyHpScale(waveIndex: number = Math.max(0, (this._waveManager?.currentWaveNum || 1) - 1)): number {
     const stage = this._getCurrentStageDef();
-    if (!stage?.enemyDensityByWave?.length) return 1;
+    if (!stage?.enemyHpScaleByWave?.length) return 1;
     const localWave = Math.max(0, waveIndex - ((stage.startWave || 1) - 1));
-    return stage.enemyDensityByWave[Math.min(localWave, stage.enemyDensityByWave.length - 1)] || 1;
+    return stage.enemyHpScaleByWave[Math.min(localWave, stage.enemyHpScaleByWave.length - 1)] || 1;
+  }
+
+  private _getStageEnemyAtkScale(waveIndex: number = Math.max(0, (this._waveManager?.currentWaveNum || 1) - 1)): number {
+    const stage = this._getCurrentStageDef();
+    if (!stage?.enemyAtkScaleByWave?.length) return 1;
+    const localWave = Math.max(0, waveIndex - ((stage.startWave || 1) - 1));
+    return stage.enemyAtkScaleByWave[Math.min(localWave, stage.enemyAtkScaleByWave.length - 1)] || 1;
+  }
+
+  private _getStageEnemySpeedScale(waveIndex: number = Math.max(0, (this._waveManager?.currentWaveNum || 1) - 1)): number {
+    const stage = this._getCurrentStageDef();
+    if (!stage?.enemySpeedScaleByWave?.length) return 1;
+    const localWave = Math.max(0, waveIndex - ((stage.startWave || 1) - 1));
+    return stage.enemySpeedScaleByWave[Math.min(localWave, stage.enemySpeedScaleByWave.length - 1)] || 1;
   }
 
   private _getStageChestHpMultiplier(): number {
     const stage = this._getCurrentStageDef();
     if (!stage?.chestHpMultiplierByWave?.length) {
-      const cfg = this._getSupplyChestConfig();
-      return 1 + Math.max(0, this._getStageWaveNum() - 1) * (cfg.waveGrowth || 0.1);
+      return 1;
     }
     const localWave = Math.max(0, this._getStageWaveNum() - 1);
     return stage.chestHpMultiplierByWave[Math.min(localWave, stage.chestHpMultiplierByWave.length - 1)] || 1;
@@ -3697,6 +4369,7 @@ export class GameManager extends Component {
 
   onDestroy(): void {
     this._audioManager?.stopBGM();
+    this._clearFloatingTexts();
     // 移除键盘监听
     input.off(Input.EventType.KEY_DOWN, this._onKeyDown, this);
     input.off(Input.EventType.KEY_UP, this._onKeyUp, this);

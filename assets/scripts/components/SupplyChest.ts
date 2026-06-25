@@ -608,6 +608,10 @@ export class SupplyChest extends Component {
     return Math.max(0, Math.min(1, this._hp / this._maxHp));
   }
 
+  get hp(): number {
+    return this._hp;
+  }
+
   get quality(): SupplyChestQuality {
     return this._quality;
   }

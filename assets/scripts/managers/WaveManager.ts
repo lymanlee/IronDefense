@@ -34,10 +34,10 @@ export class WaveManager {
   private _totalRows: number = 0;           // 总行数
   private _currentRow: number = 0;          // 当前生成的行号
   private _spawnPlan: WaveSpawnEntryData[] = [];
+  private _spawnRemaining: number[] = [];
   private _activeWaveDef: WaveDefinitionData | null = null;
   private _activeWaveData: WaveData | null = null;
-  private _densityProvider: ((waveIndex: number) => number) | null = null;
-
+  private _waveStatScaleProvider: ((waveIndex: number) => { hp: number; atk: number; speed: number }) | null = null;
   constructor() {}
 
   /**
@@ -47,8 +47,8 @@ export class WaveManager {
     this._enemyFactory = factory;
   }
 
-  setDensityProvider(provider: (waveIndex: number) => number): void {
-    this._densityProvider = provider;
+  setWaveStatScaleProvider(provider: (waveIndex: number) => { hp: number; atk: number; speed: number }): void {
+    this._waveStatScaleProvider = provider;
   }
 
   get currentWaveNum(): number {
@@ -83,6 +83,16 @@ export class WaveManager {
     return this._activeWaveDef;
   }
 
+  private _getScaledWaveData(waveData: WaveData, waveIndex: number): WaveData {
+    const scale = this._waveStatScaleProvider?.(waveIndex) || { hp: 1, atk: 1, speed: 1 };
+    return {
+      ...waveData,
+      hp: Math.max(1, Math.round(waveData.hp * Math.max(0.1, scale.hp || 1))),
+      atk: Math.max(1, Math.round(waveData.atk * Math.max(0.1, scale.atk || 1))),
+      speed: Math.max(1, waveData.speed * Math.max(0.1, scale.speed || 1)),
+    };
+  }
+
   /**
    * 获取指定波次的数据
    */
@@ -107,49 +117,52 @@ export class WaveManager {
 
   getWaveDefinition(index: number): WaveDefinitionData {
     if (index < GameConfig.waveDefs.length) {
-      const waveDef = GameConfig.waveDefs[index];
-      const density = Math.max(0.1, this._densityProvider?.(index) || 1);
-      const entries: WaveSpawnEntryData[] = waveDef.entries.map((entry) => ({
-        type: entry.type as EnemyTypeId,
-        count: Math.max(1, Math.round(entry.count * density)),
-      }));
+      const waveDef = GameConfig.waveDefs[index] as WaveDefinitionData & { mixMode?: 'sequential' | 'round_robin' };
+      const defaultMixMode = waveDef.kind === 'normal' || waveDef.kind === 'boss' ? 'sequential' : 'round_robin';
       return {
         ...waveDef,
         kind: waveDef.kind as WaveKind,
-        entries,
+        mixMode: waveDef.mixMode || defaultMixMode,
+        entries: waveDef.entries.map((entry) => ({
+          type: entry.type as EnemyTypeId,
+          count: Math.max(1, Math.round(entry.count)),
+        })),
       };
     }
 
     const data = this.getWaveData(index);
     const loop = index % 5;
-    const density = Math.max(0.1, this._densityProvider?.(index) || 1);
     const entries: WaveSpawnEntryData[] = [];
 
     if (loop === 0) {
-      entries.push({ type: 'normal' as EnemyTypeId, count: Math.max(12, Math.floor(data.count * 0.6 * density)) });
-      entries.push({ type: 'runner' as EnemyTypeId, count: Math.max(8, Math.floor(data.count * 0.4 * density)) });
+      entries.push({ type: 'normal' as EnemyTypeId, count: Math.max(12, Math.floor(data.count * 0.6)) });
+      entries.push({ type: 'runner' as EnemyTypeId, count: Math.max(8, Math.floor(data.count * 0.4)) });
     } else if (loop === 1) {
-      entries.push({ type: 'normal' as EnemyTypeId, count: Math.max(16, Math.floor(data.count * 0.55 * density)) });
-      entries.push({ type: 'shield' as EnemyTypeId, count: Math.max(6, Math.floor(data.count * 0.2 * density)) });
-      entries.push({ type: 'runner' as EnemyTypeId, count: Math.max(8, Math.floor(data.count * 0.25 * density)) });
+      entries.push({ type: 'normal' as EnemyTypeId, count: Math.max(16, Math.floor(data.count * 0.55)) });
+      entries.push({ type: 'shield' as EnemyTypeId, count: Math.max(6, Math.floor(data.count * 0.2)) });
+      entries.push({ type: 'runner' as EnemyTypeId, count: Math.max(8, Math.floor(data.count * 0.25)) });
     } else if (loop === 2) {
-      entries.push({ type: 'normal' as EnemyTypeId, count: Math.max(16, Math.floor(data.count * 0.45 * density)) });
-      entries.push({ type: 'runner' as EnemyTypeId, count: Math.max(10, Math.floor(data.count * 0.35 * density)) });
-      entries.push({ type: 'suicide' as EnemyTypeId, count: Math.max(6, Math.floor(data.count * 0.2 * density)) });
+      entries.push({ type: 'normal' as EnemyTypeId, count: Math.max(16, Math.floor(data.count * 0.45)) });
+      entries.push({ type: 'runner' as EnemyTypeId, count: Math.max(10, Math.floor(data.count * 0.35)) });
+      entries.push({ type: 'suicide' as EnemyTypeId, count: Math.max(6, Math.floor(data.count * 0.2)) });
     } else if (loop === 3) {
-      entries.push({ type: 'shield' as EnemyTypeId, count: Math.max(10, Math.floor(data.count * 0.35 * density)) });
-      entries.push({ type: 'runner' as EnemyTypeId, count: Math.max(10, Math.floor(data.count * 0.35 * density)) });
-      entries.push({ type: 'suicide' as EnemyTypeId, count: Math.max(8, Math.floor(data.count * 0.3 * density)) });
+      entries.push({ type: 'shield' as EnemyTypeId, count: Math.max(10, Math.floor(data.count * 0.35)) });
+      entries.push({ type: 'runner' as EnemyTypeId, count: Math.max(10, Math.floor(data.count * 0.35)) });
+      entries.push({ type: 'suicide' as EnemyTypeId, count: Math.max(8, Math.floor(data.count * 0.3)) });
     } else {
       entries.push({ type: 'boss_bulldozer' as EnemyTypeId, count: 1 });
-      entries.push({ type: 'runner' as EnemyTypeId, count: Math.max(10, Math.floor(data.count * 0.28 * density)) });
-      entries.push({ type: 'shield' as EnemyTypeId, count: Math.max(8, Math.floor(data.count * 0.18 * density)) });
+      entries.push({ type: 'runner' as EnemyTypeId, count: Math.max(10, Math.floor(data.count * 0.28)) });
+      entries.push({ type: 'shield' as EnemyTypeId, count: Math.max(8, Math.floor(data.count * 0.18)) });
     }
 
     return {
       kind: loop === 4 ? 'boss' : loop === 3 ? 'crisis' : 'mixed',
       title: loop === 4 ? `装甲压境 ${index + 1}` : `扩展波次 ${index + 1}`,
-      entries,
+      mixMode: loop === 4 ? 'sequential' : 'round_robin',
+      entries: entries.map((entry) => ({
+        type: entry.type as EnemyTypeId,
+        count: Math.max(1, Math.round(entry.count)),
+      })),
       spawnInterval: Math.max(0.18, data.spawnInterval),
       pauseTime: loop === 4 ? 8 : GameConfig.wavePauseTime,
     };
@@ -189,6 +202,7 @@ export class WaveManager {
     };
     this._activeWaveDef = waveDef;
     this._spawnPlan = waveDef.entries.map(entry => ({ ...entry }));
+    this._spawnRemaining = this._spawnPlan.map(entry => entry.count);
 
     const totalCount = this._spawnPlan.reduce((sum, entry) => sum + entry.count, 0);
     const formation = this._calcFormation(totalCount);
@@ -279,7 +293,7 @@ export class WaveManager {
 
       const enemy = this._enemyFactory();
       const enemyType = this._consumeNextEnemyType();
-      enemy.init(waveData, this.currentWaveNum, slotIndex, rowIndex, totalSlots, totalRows, x, enemyType);
+      enemy.init(this._getScaledWaveData(waveData, this._waveIndex), this.currentWaveNum, slotIndex, rowIndex, totalSlots, totalRows, x, enemyType);
       this._enemies.push(enemy);
       this._spawnCount++;
       this._spawnSlotCursor++;
@@ -297,6 +311,18 @@ export class WaveManager {
 
   private _consumeNextEnemyType(): EnemyTypeId {
     if (this._spawnPlan.length === 0) return 'normal';
+
+    if (this._activeWaveDef?.mixMode === 'round_robin') {
+      const entryCount = this._spawnPlan.length;
+      for (let offset = 0; offset < entryCount; offset++) {
+        const idx = (this._spawnPlanIndex + offset) % entryCount;
+        if ((this._spawnRemaining[idx] || 0) <= 0) continue;
+        this._spawnRemaining[idx]--;
+        this._spawnPlanIndex = (idx + 1) % entryCount;
+        return this._spawnPlan[idx].type;
+      }
+      return this._spawnPlan[this._spawnPlan.length - 1].type;
+    }
 
     while (this._spawnPlanIndex < this._spawnPlan.length) {
       const entry = this._spawnPlan[this._spawnPlanIndex];
@@ -353,6 +379,7 @@ export class WaveManager {
     this._totalRows = 0;
     this._currentRow = 0;
     this._spawnPlan = [];
+    this._spawnRemaining = [];
     this._activeWaveDef = null;
     this._activeWaveData = null;
   }

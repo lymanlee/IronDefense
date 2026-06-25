@@ -3,7 +3,7 @@
  * 控制敌人的移动、AI漫游、攻击和帧动画渲染
  */
 
-import { _decorator, Component, Sprite, UIOpacity, Color, SpriteFrame, Node, UITransform, Vec3 } from 'cc';
+import { _decorator, Component, Sprite, UIOpacity, Color, SpriteFrame, Node, UITransform, Graphics, Label } from 'cc';
 import { GameConfig, WaveData, EnemyTypeId, EnemyTypeData } from '../data/GameConfig';
 import { BundleLoader } from '../managers/BundleLoader';
 
@@ -13,19 +13,17 @@ const { ccclass, property } = _decorator;
 export class Enemy extends Component {
   private static _nextSpawnToken: number = 1;
 
-  // ==================== 波次颜色映射 ====================
-  // 注意：颜色会被 Sprite.color 乘法调制，太浅的颜色闪白不明显
-  // 调低基础亮度以便闪白效果清晰可见
-  private static readonly WAVE_COLORS: Color[] = [
-    new Color(200, 200, 200),  // 波次1: 中灰色（原白色太浅）
-    new Color(80, 180, 80),    // 波次2: 深绿色
-    new Color(80, 100, 200),   // 波次3: 深蓝色
-    new Color(200, 160, 80),   // 波次4: 深橙色
-    new Color(200, 100, 200),  // 波次5: 深紫色
-    new Color(200, 80, 80),    // 波次6: 深红色
-    new Color(80, 180, 180),  // 波次7: 深青色
-    new Color(200, 200, 80),  // 波次8+: 橙黄色
-  ];
+  // ==================== 敌人类型主色 ====================
+  // 使用固定类型主色，保证跨波次识别一致性
+  private static readonly TYPE_BASE_COLORS: Record<EnemyTypeId, Color> = {
+    normal: new Color(214, 214, 214, 255),
+    runner: new Color(110, 214, 255, 255),
+    shield: new Color(255, 214, 120, 255),
+    suicide: new Color(255, 134, 124, 255),
+    healer: new Color(158, 220, 168, 255),
+    boss_bulldozer: new Color(255, 196, 116, 255),
+    boss_commander: new Color(212, 160, 255, 255),
+  };
 
   // ==================== 组件引用 ====================
   private _sprite: Sprite | null = null;
@@ -80,11 +78,20 @@ export class Enemy extends Component {
   private _shadowNode: Node | null = null;
   private _shadowSprite: Sprite | null = null;
   private _shadowOpacity: UIOpacity | null = null;
+  private _bossHpBarRoot: Node | null = null;
+  private _bossHpBarBg: Graphics | null = null;
+  private _bossHpBarFillNode: Node | null = null;
+  private _bossHpBarFill: Graphics | null = null;
+  private _bossHpBarFillTransform: UITransform | null = null;
+  private _bossHpLabel: Label | null = null;
   private static readonly SHADOW_OFFSET_X: number = 3;    // 阴影X偏移（阳光从后方照射，影子向前）
   private static readonly SHADOW_OFFSET_Y: number = -50;   // 阴影Y偏移
   private static readonly SHADOW_SCALE_Y: number = 0.3;     // 阴影Y轴压扁
   private static readonly SHADOW_ALPHA: number = 60;        // 阴影透明度(0-255)
   private static readonly SUICIDE_BLINK_THRESHOLD: number = 0.35;
+  private static readonly BOSS_HP_BAR_WIDTH: number = 68;
+  private static readonly BOSS_HP_BAR_HEIGHT: number = 6;
+  private static readonly BOSS_HP_BAR_INNER_HEIGHT: number = 3;
 
   // ==================== 初始化 ====================
 
@@ -96,6 +103,7 @@ export class Enemy extends Component {
 
     // 创建阴影子节点
     this._createShadow();
+    this._createBossHpBar();
 
     // 预加载帧动画
     this._loadFrames();
@@ -128,6 +136,108 @@ export class Enemy extends Component {
 
     // 置于角色下方（z 越小越先渲染 = 越底层）
     this._shadowNode.setSiblingIndex(0);
+  }
+
+  private _createBossHpBar(): void {
+    this._bossHpBarRoot = new Node('BossHpBar');
+    this.node.addChild(this._bossHpBarRoot);
+
+    const rootTransform = this._bossHpBarRoot.addComponent(UITransform);
+    rootTransform.setContentSize(96, 24);
+    this._bossHpBarRoot.setSiblingIndex(99);
+
+    const bgNode = new Node('Bg');
+    this._bossHpBarRoot.addChild(bgNode);
+    const bgTransform = bgNode.addComponent(UITransform);
+    bgTransform.setContentSize(Enemy.BOSS_HP_BAR_WIDTH, Enemy.BOSS_HP_BAR_HEIGHT);
+    bgNode.setPosition(0, 5, 0);
+    this._bossHpBarBg = bgNode.addComponent(Graphics);
+
+    this._bossHpBarFillNode = new Node('Fill');
+    this._bossHpBarRoot.addChild(this._bossHpBarFillNode);
+    this._bossHpBarFillTransform = this._bossHpBarFillNode.addComponent(UITransform);
+    this._bossHpBarFillTransform.setAnchorPoint(0, 0.5);
+    this._bossHpBarFillTransform.setContentSize(Enemy.BOSS_HP_BAR_WIDTH - 6, Enemy.BOSS_HP_BAR_INNER_HEIGHT);
+    this._bossHpBarFillNode.setPosition(-Enemy.BOSS_HP_BAR_WIDTH * 0.5 + 3, 5, 0);
+    this._bossHpBarFill = this._bossHpBarFillNode.addComponent(Graphics);
+
+    const hpLabelNode = new Node('BossHpLabel');
+    this._bossHpBarRoot.addChild(hpLabelNode);
+    const hpLabelTransform = hpLabelNode.addComponent(UITransform);
+    hpLabelTransform.setContentSize(108, 14);
+    hpLabelNode.setPosition(0, -6, 0);
+    this._bossHpLabel = hpLabelNode.addComponent(Label);
+    this._bossHpLabel.fontSize = 8;
+    this._bossHpLabel.lineHeight = 10;
+    this._bossHpLabel.isBold = true;
+    this._bossHpLabel.enableOutline = true;
+    this._bossHpLabel.outlineColor = new Color(8, 10, 14, 230);
+    this._bossHpLabel.outlineWidth = 2;
+    this._bossHpLabel.horizontalAlign = Label.HorizontalAlign.CENTER;
+    this._bossHpLabel.verticalAlign = Label.VerticalAlign.CENTER;
+
+    this._redrawBossHpBarBg();
+    this._refreshBossHpBar();
+  }
+
+  private _redrawBossHpBarBg(): void {
+    if (!this._bossHpBarBg) return;
+    const w = Enemy.BOSS_HP_BAR_WIDTH;
+    const h = Enemy.BOSS_HP_BAR_HEIGHT;
+    this._bossHpBarBg.clear();
+    this._bossHpBarBg.fillColor = new Color(9, 13, 17, 170);
+    this._bossHpBarBg.roundRect(-w * 0.5, -h * 0.5, w, h, 4);
+    this._bossHpBarBg.fill();
+  }
+
+  private _refreshBossHpBar(): void {
+    if (!this._bossHpBarRoot || !this._bossHpBarFill || !this._bossHpBarFillTransform) return;
+
+    const visible = this.isBoss && !this._dead;
+    this._bossHpBarRoot.active = visible;
+    if (!visible) return;
+
+    const offsetY = 42 + Math.max(0, this._enemyTypeData.scale - 1) * 10;
+    this._bossHpBarRoot.setPosition(0, offsetY, 0);
+
+    const maxWidth = Enemy.BOSS_HP_BAR_WIDTH - 6;
+    const ratio = this._maxHp > 0 ? Math.max(0, Math.min(1, this._hp / this._maxHp)) : 0;
+    const fillWidth = Math.max(ratio <= 0 ? 0 : 4, Math.round(maxWidth * ratio));
+    this._bossHpBarFillTransform.setContentSize(fillWidth, Enemy.BOSS_HP_BAR_INNER_HEIGHT);
+
+    this._bossHpBarFill.clear();
+    if (this._bossHpLabel) {
+      this._bossHpLabel.string = `${this._formatCompactValue(this._hp)} / ${this._formatCompactValue(this._maxHp)}`;
+      this._bossHpLabel.color = new Color(255, 248, 232, 255);
+    }
+    if (fillWidth <= 0) return;
+
+    const fillColor = ratio <= 0.22
+      ? new Color(255, 112, 84, 255)
+      : ratio <= 0.55
+        ? new Color(255, 184, 92, 255)
+        : new Color(255, 160, 66, 255);
+    this._bossHpBarFill.fillColor = fillColor;
+    this._bossHpBarFill.roundRect(0, -Enemy.BOSS_HP_BAR_INNER_HEIGHT * 0.5, fillWidth, Enemy.BOSS_HP_BAR_INNER_HEIGHT, 2);
+    this._bossHpBarFill.fill();
+  }
+
+  private _formatCompactValue(value: number): string {
+    const safeValue = Math.max(0, Math.round(value));
+    if (safeValue >= 100000000) {
+      return this._formatCompactUnit(safeValue, 100000000, '亿');
+    }
+    if (safeValue >= 10000) {
+      return this._formatCompactUnit(safeValue, 10000, '万');
+    }
+    return `${safeValue}`;
+  }
+
+  private _formatCompactUnit(value: number, unitValue: number, unitLabel: string): string {
+    const scaled = value / unitValue;
+    const digits = scaled >= 100 ? 0 : scaled >= 10 ? 1 : 2;
+    const text = scaled.toFixed(digits).replace(/\.0+$/, '').replace(/(\.\d*[1-9])0+$/, '$1');
+    return `${text}${unitLabel}`;
   }
 
   private _loadFrames(): void {
@@ -190,9 +300,8 @@ export class Enemy extends Component {
     this._attackEffectTimer = 0;
     this._deathTimer = 0;
 
-    // 根据波次设置基础颜色
-    const colorIndex = Math.min(waveNum - 1, Enemy.WAVE_COLORS.length - 1);
-    this._baseColor = Enemy.WAVE_COLORS[colorIndex].clone();
+    // 根据敌人类型设置固定主色
+    this._baseColor = (Enemy.TYPE_BASE_COLORS[this._enemyType] || Enemy.TYPE_BASE_COLORS.normal).clone();
     this._flashColor = Color.WHITE.clone();
 
     // 重置帧动画
@@ -210,6 +319,7 @@ export class Enemy extends Component {
       this._sprite.color = this._resolveBaseColor();
     }
     this.node.setScale(this._enemyTypeData.scale, this._enemyTypeData.scale, 1);
+    this._refreshBossHpBar();
   }
 
   private _setFrame(index: number): void {
@@ -227,7 +337,7 @@ export class Enemy extends Component {
   // ==================== 每帧更新 ====================
 
   // Manual tick driven by GameManager. Avoid Cocos Component.update auto-running in parallel.
-  tick(dt: number): void {
+  tick(dt: number, movementLocked: boolean = false): void {
     if (this._battleFrozen) return;
     this._spawnTimer += dt;
     if (this._openingArmorTimer > 0) {
@@ -265,7 +375,9 @@ export class Enemy extends Component {
       return;
     }
 
-    this._updateMovement(dt);
+    if (!movementLocked) {
+      this._updateMovement(dt);
+    }
   }
 
   /**
@@ -361,12 +473,14 @@ export class Enemy extends Component {
       this._hp = 0;
       this._dead = true;
     }
+    this._refreshBossHpBar();
   }
 
   heal(amount: number): void {
     if (this._dead || amount <= 0) return;
     this._hp = Math.min(this._maxHp, this._hp + amount);
     this._flashTimer = this._flashDuration * 0.4;
+    this._refreshBossHpBar();
   }
 
   /**
@@ -492,6 +606,7 @@ export class Enemy extends Component {
     this._speedBoostTimer = 0;
     this._phaseTriggered = false;
     this._battleFrozen = false;
+    this._refreshBossHpBar();
     this.node.setPosition(0, -2000, 0);
     this.node.setScale(1, 1, 1);
   }
