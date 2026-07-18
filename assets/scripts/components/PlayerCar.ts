@@ -654,6 +654,11 @@ export class PlayerCar extends Component {
     this._keyRight = value;
   }
 
+  setWorldX(x: number): void {
+    this._x = x;
+    this.node.setPosition(this._x, this._y, 0);
+  }
+
   // Getters
   get hp(): number { return this._hp; }
   get maxHp(): number { return this._maxHp; }

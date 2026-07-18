@@ -4,7 +4,7 @@
  */
 
 import { _decorator, Component, Node, instantiate, Prefab, tween, Vec3, Color, Tween, input, Input, KeyCode, director, Sprite, UIOpacity, UITransform, Graphics, Label, Button, SpriteFrame, Vec3 as CcVec3, view } from 'cc';
-import { GameConfig, PermanentUpgradeId, SupplyCardStar, SupplyCardType, SupplyChestConfigData, SupplyChestQuality, SupplyChestQualityRuleData, SupplyConfigData, SupplyOptionData, SupplyStarRuleData, WaveData, WaveDefinitionData, WeaponBehavior, WeaponEvolutionData, WeaponEvolutionId } from '../data/GameConfig';
+import { BaselineCalibrationConfigData, GameConfig, PermanentUpgradeId, SupplyCardStar, SupplyCardType, SupplyChestConfigData, SupplyChestQuality, SupplyConfigData, SupplyOptionData, SupplyStarRuleData, WaveData, WaveDefinitionData, WeaponBehavior, WeaponEvolutionData, WeaponEvolutionId } from '../data/GameConfig';
 import { WeaponTierSystem } from '../components/WeaponTierSystem';
 import { AttackTarget, PlayerCar } from '../components/PlayerCar';
 import { Enemy } from '../components/Enemy';
@@ -14,7 +14,9 @@ import { WaveManager } from '../managers/WaveManager';
 import { AudioManager } from '../managers/AudioManager';
 import { ObjectPool } from '../managers/ObjectPool';
 import { AdsManager } from '../managers/AdsManager';
+import { ShareManager } from '../managers/ShareManager';
 import { ProgressManager, RunReward } from '../managers/ProgressManager';
+import { RunTelemetryManager } from '../managers/RunTelemetryManager';
 import { StageManager } from '../managers/StageManager';
 import { StartScreen } from '../ui/StartScreen';
 import { HUDController } from '../ui/HUDController';
@@ -26,7 +28,7 @@ import { BundleLoader } from './BundleLoader';
 const { ccclass, property } = _decorator;
 
 type GameState = 'start' | 'debug' | 'playing' | 'paused' | 'gameover' | 'victory' | 'revive' | 'supply' | 'ad';
-type PreviewEnemyType = 'mixed' | 'normal' | 'shield' | 'runner' | 'suicide' | 'healer' | 'boss_bulldozer' | 'boss_commander';
+type PreviewEnemyType = 'mixed' | 'baseline_calibration' | 'baseline_parallel' | 'baseline_serial' | 'normal' | 'shield' | 'runner' | 'suicide' | 'healer' | 'boss_bulldozer' | 'boss_commander';
 
 interface ChestSlotData {
   x: number;
@@ -140,6 +142,7 @@ export class GameManager extends Component {
   private _playerCar: PlayerCar | null = null;
   private _adsManager: AdsManager = AdsManager.instance;
   private _progressManager: ProgressManager = ProgressManager.instance;
+  private _telemetry: RunTelemetryManager = new RunTelemetryManager();
   private _stageManager: StageManager = new StageManager();
 
   // 对象池
@@ -183,9 +186,13 @@ export class GameManager extends Component {
   private _weaponEvolutionId: WeaponEvolutionId | null = null;
   private _previewEnemyType: PreviewEnemyType = 'mixed';
   private _isPreviewMode: boolean = false;
+  private _isBaselineCalibrationMode: boolean = false;
   private _previewMovementLocked: boolean = false;
   private _enemySkillIds: WeakMap<Enemy, string> = new WeakMap();
   private _enemySkillSeq: number = 0;
+  private _baselineSpawnTimer: number = 0;
+  private _baselineAutoSweepDirection: 1 | -1 = 1;
+  private _railContactLoggedTokens: Set<number> = new Set();
 
   // 固定时间步长（避免帧率抖动导致子弹/敌人移动跳跃）
   private readonly _FIXED_DT: number = 1 / 60;  // 60Hz 固定步长
@@ -223,10 +230,11 @@ export class GameManager extends Component {
   private _waveBannerNode: Node | null = null;
   private _waveSupportTimers: Map<string, number> = new Map();
   private _supplyChests: SupplyChest[] = [];
-  private _chestSpawnTimer: number = 0;
-  private _chestSpawnDelay: number = 0;
   private _chestSelectionsThisRun: number = 0;
   private _chestSpawnSerial: number = 0;
+  private _plannedWaveChestQueue: SupplyChestQuality[] = [];
+  private _plannedWaveChestSpawnTimer: number = 0;
+  private _plannedWaveChestSpawnedCount: number = 0;
   private _chestSlots: ChestSlotData[] = [];
   private _chestTrackX: number = 0;
   private _battleFrozen: boolean = false;
@@ -239,6 +247,8 @@ export class GameManager extends Component {
   private _bonusPierceCount: number = 0;
   private _bonusChainCount: number = 0;
   private _bonusChainRangeMultiplier: number = 1;
+  private _activeSupplyRewardSerial: number | null = null;
+  private _activeSupplyRewardWave: number | null = null;
 
   // 触控
   private _touchStartX: number = 0;
@@ -270,6 +280,9 @@ export class GameManager extends Component {
         }
         return enemy;
       });
+      this._waveManager.setEnemySpawnListener((waveNum) => {
+        this._telemetry.recordEnemySpawn(waveNum);
+      });
       this._waveManager.setWaveStatScaleProvider((waveIndex) => ({
         hp: this._getStageEnemyHpScale(waveIndex),
         atk: this._getStageEnemyAtkScale(waveIndex),
@@ -297,6 +310,9 @@ export class GameManager extends Component {
         overlayNode.active = true;
       }
       this._adsManager.init(overlayNode || canvas || null);
+
+      // 启用微信分享菜单（默认置灰，需主动声明才会点亮转发 / 分享朋友圈）
+      ShareManager.instance.init();
 
       // StartScreen
       this._startScreenNode = overlayNode?.getChildByName('StartScreen') || null;
@@ -656,21 +672,41 @@ export class GameManager extends Component {
     this._updateDamageFlash(dt);
 
     // 更新波次
-    this._waveManager.update(dt);
-    if (!this._stageVictoryPending && this._stageManager.isStageComplete(this._waveManager.currentWaveNum)) {
-      this._stageVictoryPending = true;
+    if (!this._isBaselineCalibrationMode) {
+      this._waveManager.update(dt);
+      if (!this._stageVictoryPending && this._stageManager.isStageComplete(this._waveManager.currentWaveNum)) {
+        this._stageVictoryPending = true;
+      }
+      if (this._waveManager.consumeWaveStart()) {
+        this._telemetry.startWave({
+          wave: this._getStageWaveNum(),
+          battleTime: this._battleElapsed,
+          plannedEnemies: this._waveManager.currentPlannedEnemyCount,
+          playerHpStart: this._playerCar.hp,
+        });
+        this._prepareCurrentWaveChestPlan();
+        this._playerCar.resetFireTimer();
+        if (this._pendingShieldSeconds > 0) {
+          this._playerCar.setInvulnerable(this._pendingShieldSeconds);
+          this._pendingShieldSeconds = 0;
+        }
+        this._showWaveBanner(this._waveManager.currentWaveDef);
+      }
     }
     this._refreshWaveBonuses();
 
     // 更新敌人
     const enemies = this._waveManager.activeEnemies;
     if (!this._battleFrozen) {
-      this._supplyChests.forEach(activeChest => activeChest.updateChest(dt));
-      this._updateChestSpawn(dt, enemies);
-      enemies.forEach(e => e.tick(dt, this._previewMovementLocked));
+      if (!this._shouldDisableChestsInCurrentRun()) {
+        this._supplyChests.forEach(activeChest => activeChest.updateChest(dt));
+        this._updateChestSpawn(dt, enemies);
+      }
+      enemies.forEach(e => e.tick(dt, this._isMovementLockSandboxMode() ? this._previewMovementLocked : false));
       this._applyPendingWaveOpeningEffects(enemies);
       this._updateSpecialEnemies(enemies, dt);
     }
+    this._updateEnemyRailContactTelemetry(enemies);
 
     // 已在护栏敌人攻击武装车
     if (!this._battleFrozen) {
@@ -678,6 +714,7 @@ export class GameManager extends Component {
         if (e.reachedRail && !e.dead) {
           if (e.tryAttack()) {
             this._playerCar!.takeDamage(e.atk);
+            this._telemetry.recordPlayerDamaged(this._getStageWaveNum(), e.atk, this._playerCar!.hp, this._battleElapsed);
             this._audioManager?.alarm();
             if (e.isSuicide) {
               this._spawnExplosion(e.x, e.y);
@@ -695,7 +732,7 @@ export class GameManager extends Component {
       return;
     }
 
-    if (this._stageVictoryPending && enemies.length === 0 && this._getActiveSupplyChests().length === 0) {
+    if (!this._isBaselineCalibrationMode && this._stageVictoryPending && enemies.length === 0) {
       this._enterVictory();
       return;
     }
@@ -720,14 +757,8 @@ export class GameManager extends Component {
     // 更新武装车
     this._playerCar.tick(dt);
 
-    // 新波次开始时重置射击计时器
-    if (this._waveManager.consumeWaveStart()) {
-      this._playerCar.resetFireTimer();
-      if (this._pendingShieldSeconds > 0) {
-        this._playerCar.setInvulnerable(this._pendingShieldSeconds);
-        this._pendingShieldSeconds = 0;
-      }
-      this._showWaveBanner(this._waveManager.currentWaveDef);
+    if (this._isBaselineCalibrationMode) {
+      this._updateBaselineCalibration(dt);
     }
 
     // 自动射击
@@ -775,6 +806,15 @@ export class GameManager extends Component {
     const removedEnemies = this._waveManager.cleanupEnemies(dt);
     for (const enemy of removedEnemies) {
       this._enemyPool?.put(enemy);
+    }
+
+    if (!this._isBaselineCalibrationMode && this._waveManager.inPause) {
+      const finishedWave = Math.max(1, this._getStageWaveNum() - 1);
+      this._telemetry.finishWave({
+        wave: finishedWave,
+        battleTime: this._battleElapsed,
+        playerHpEnd: this._playerCar.hp,
+      });
     }
   }
 
@@ -949,6 +989,9 @@ export class GameManager extends Component {
     const prevHp = enemy.hp;
     enemy.takeDamage(damage);
     const appliedDamage = Math.max(0, prevHp - enemy.hp);
+    if (appliedDamage > 0) {
+      this._telemetry.recordEnemyDamage(enemy.waveNum, source, appliedDamage, enemy.dead);
+    }
     if (enemy.dead) {
       this._clearTargetDamageBinding(this._enemyDamageTextBindings, enemy);
       this._showKillValueNumber(enemy.x, enemy.y + 18, enemy.maxHp);
@@ -1011,6 +1054,7 @@ export class GameManager extends Component {
 
   private _handleEnemyKilled(enemy: Enemy): void {
     this._kills++;
+    this._telemetry.recordEnemyKilled(enemy.waveNum, enemy.maxHp);
     if (this._suppressEnemyKillFx <= 0) {
       this._spawnExplosion(enemy.x, enemy.y);
       this._audioManager?.explode();
@@ -1989,6 +2033,7 @@ export class GameManager extends Component {
 
     this._state = 'victory';
     this._audioManager?.stopBGM();
+    this._getActiveSupplyChests().forEach(chest => chest.reset());
     this._closeRevivePanel();
     this._closeSupplyPanel(false);
 
@@ -2018,6 +2063,13 @@ export class GameManager extends Component {
     }
     if (this._hud) this._hud.node.active = false;
     this._refreshPauseButtonState();
+    this._telemetry.finishRun({
+      battleTime: this._battleElapsed,
+      result: 'victory',
+      currentWave: this._getStageWaveNum(),
+      playerHpEnd: this._playerCar?.hp || 0,
+      kills: this._kills,
+    });
   }
 
   private _showReviveOffer(): void {
@@ -2125,6 +2177,14 @@ export class GameManager extends Component {
     }
     if (this._hud) this._hud.node.active = false;
     this._refreshPauseButtonState();
+    this._telemetry.finishRun({
+      battleTime: this._battleElapsed,
+      result: 'gameover',
+      failureWave: this._getStageWaveNum(),
+      currentWave: this._getStageWaveNum(),
+      playerHpEnd: this._playerCar?.hp || 0,
+      kills: this._kills,
+    });
   }
 
   private _calculateRunReward(): RunReward {
@@ -2190,6 +2250,15 @@ export class GameManager extends Component {
     }
     this._freezeBattle();
     this._refreshPauseButtonState();
+    this._activeSupplyRewardSerial = chest.serial;
+    this._activeSupplyRewardWave = this._getStageWaveNum();
+    this._telemetry.recordSupplyShown({
+      serial: chest.serial,
+      wave: this._getStageWaveNum(),
+      sourceQuality: currentQuality,
+      battleTime: this._battleElapsed,
+      options: currentChoices,
+    });
     const renderPanel = (statusText: string): void => {
       this._populateSupplyPanel(
         `${this._getChestQualityName(currentQuality)}补给开启`,
@@ -2222,9 +2291,22 @@ export class GameManager extends Component {
             return;
           }
           currentChoices = refreshed;
+          this._telemetry.recordSupplyRefresh({
+            serial: chest.serial,
+            wave: this._getStageWaveNum(),
+            refreshedQuality: currentQuality,
+            battleTime: this._battleElapsed,
+            options: refreshed,
+          });
           renderPanel(`已刷新补给卡 · ${this._getChestQualityName(currentQuality)}品质概率提升`);
         },
         (option) => {
+          this._telemetry.recordSupplyPicked({
+            serial: this._activeSupplyRewardSerial ?? chest.serial,
+            wave: this._activeSupplyRewardWave ?? this._getStageWaveNum(),
+            battleTime: this._battleElapsed,
+            option,
+          });
           this._closeSupplyPanelWithCallback(true, () => {
             this._applySupplyOptionAfterPanelClose(option, () => {
               this._showFloatingNotice(chest.x, chest.y + 44, option.title, new Color(255, 228, 150));
@@ -2881,10 +2963,11 @@ export class GameManager extends Component {
 
   private _resetSupplyChestState(): void {
     this._ensureSupplyChestNodes().forEach(chest => chest.reset());
-    this._chestSpawnTimer = 0;
-    this._chestSpawnDelay = this._rollNextChestDelay();
     this._chestSelectionsThisRun = 0;
     this._chestSpawnSerial = 0;
+    this._plannedWaveChestQueue = [];
+    this._plannedWaveChestSpawnTimer = 0;
+    this._plannedWaveChestSpawnedCount = 0;
     this._setupChestTrack();
   }
 
@@ -2893,45 +2976,61 @@ export class GameManager extends Component {
 
     const cfg = this._getSupplyChestConfig();
     const stageWaveNum = this._getStageWaveNum();
-    if (this._chestSelectionsThisRun >= cfg.maxSelectionsPerRun) return;
-    if (stageWaveNum < cfg.minWave) return;
-    if (enemies.length === 0) return;
-    if (this._getActiveSupplyChests().length >= Math.max(1, cfg.capacity || 1)) return;
+    const activeChestCount = this._getActiveSupplyChests().length;
+    const chestCapacity = Math.max(1, cfg.capacity || 1);
 
-    this._chestSpawnTimer += dt;
-    if (this._chestSpawnTimer < this._chestSpawnDelay) return;
-    this._spawnSupplyChest();
+    if (stageWaveNum < cfg.minWave) return;
+    if (this._chestSelectionsThisRun >= cfg.maxSelectionsPerRun) return;
+    if (this._plannedWaveChestQueue.length <= 0) return;
+    if (enemies.length === 0) return;
+    if (activeChestCount >= chestCapacity) return;
+    this._plannedWaveChestSpawnTimer += dt;
+    if (this._plannedWaveChestSpawnTimer < this._getPlannedWaveChestDelay()) return;
+    const nextQuality = this._plannedWaveChestQueue[0];
+    if (!nextQuality) return;
+    const spawned = this._spawnSupplyChest(nextQuality);
+    if (!spawned) return;
+    this._plannedWaveChestQueue.shift();
+    this._plannedWaveChestSpawnedCount++;
+    this._plannedWaveChestSpawnTimer = 0;
   }
 
-  private _spawnSupplyChest(): void {
-    if (!this._waveManager) return;
+  private _spawnSupplyChest(quality: SupplyChestQuality): boolean {
+    if (!this._waveManager) return false;
     const cfg = this._getSupplyChestConfig();
     const chest = this._supplyChests.find(item => item.dead);
-    if (!chest) return;
+    if (!chest) return false;
     const waveData = this._waveManager.getWaveData(Math.max(0, this._waveManager.waveIndex));
     const serial = this._chestSpawnSerial;
-    const quality = this._pickChestQuality();
     const hp = this._getSupplyChestHp(serial, waveData.hp, quality);
     const slot = this._chestSlots[0];
     chest.init(quality, slot.x, this._getChestSpawnY(), hp, cfg.radius, serial, cfg.moveSpeed, 0, 0);
     chest.setTrackTarget(slot.x, slot.y);
     this._chestSpawnSerial++;
+    this._telemetry.recordChestSpawn({
+      serial,
+      quality,
+      wave: this._getStageWaveNum(),
+      battleTime: this._battleElapsed,
+      maxHp: hp,
+    });
     this._reflowChestTrack();
-    this._chestSpawnTimer = 0;
-    this._chestSpawnDelay = this._rollNextChestDelay();
     this._showFloatingNotice(slot.x, slot.y + 56, `${this._getChestQualityName(quality)}补给入列`, new Color(255, 223, 140));
+    return true;
   }
 
   private _handleSupplyChestDestroyed(chest: SupplyChest): void {
-    const cfg = this._getSupplyChestConfig();
     this._chestSelectionsThisRun++;
+    this._telemetry.recordChestDestroyed({
+      serial: chest.serial,
+      wave: this._getStageWaveNum(),
+      battleTime: this._battleElapsed,
+    });
     this._spawnChestDestroyFx(chest);
     this._playChestDestroySfx(chest);
     this._freezeBattle();
     chest.reset();
     this._reflowChestTrack();
-    this._chestSpawnTimer = 0;
-    this._chestSpawnDelay = Math.max(0.15, cfg.refillDelay || 0.45);
     const runSerial = this._runSerial;
     this.scheduleOnce(() => {
       if (!this.node?.isValid || runSerial !== this._runSerial) return;
@@ -3049,42 +3148,31 @@ export class GameManager extends Component {
     }
   }
 
-  private _rollNextChestDelay(): number {
+  private _getPlannedWaveChestDelay(): number {
     const cfg = this._getSupplyChestConfig();
-    return Math.max(0.15, cfg.baseSpawnDelay + (Math.random() * 2 - 1) * cfg.delayVariance);
+    if (this._plannedWaveChestSpawnedCount <= 0) {
+      return Math.max(0.15, cfg.plannedWaveStartDelay ?? 4);
+    }
+    return Math.max(0.15, cfg.plannedSpawnGap ?? 6);
   }
 
-  private _pickChestQuality(): SupplyChestQuality {
-    const serial = this._chestSpawnSerial;
-    const supplyTier = this._progressManager.getPermanentBonuses().supplyQualityTier || 0;
-    const rules = this._getSupplyChestConfig().qualityRules || [];
-    if (rules.length === 0) return 'normal';
-
-    const rule = rules.find((item) => serial <= item.serialMax) || rules[rules.length - 1];
-    return this._rollChestQualityFromRule(rule, supplyTier);
+  private _prepareCurrentWaveChestPlan(): void {
+    const waveDef = this._waveManager?.currentWaveDef || null;
+    this._plannedWaveChestQueue = this._expandWaveChestPlan(waveDef);
+    this._plannedWaveChestSpawnTimer = 0;
+    this._plannedWaveChestSpawnedCount = 0;
   }
 
-  private _rollChestQualityFromRule(rule: SupplyChestQualityRuleData, supplyTier: number): SupplyChestQuality {
-    const qualityOrder: SupplyChestQuality[] = ['normal', 'elite', 'rare', 'legendary'];
-    const weights = qualityOrder.map((quality) => {
-      const baseWeight = Math.max(0, rule.weights[quality] || 0);
-      if (quality === 'elite') return baseWeight * (1 + supplyTier * 0.08);
-      if (quality === 'rare') return baseWeight * (1 + supplyTier * 0.14);
-      if (quality === 'legendary') return baseWeight * (1 + supplyTier * 0.2);
-      return baseWeight;
-    });
-
-    const total = weights.reduce((sum, weight) => sum + weight, 0);
-    if (total <= 0) return 'normal';
-
-    let roll = Math.random() * total;
-    for (let i = 0; i < qualityOrder.length; i++) {
-      roll -= weights[i];
-      if (roll <= 0) {
-        return qualityOrder[i];
+  private _expandWaveChestPlan(waveDef: WaveDefinitionData | null): SupplyChestQuality[] {
+    if (!waveDef?.chests?.length) return [];
+    const queue: SupplyChestQuality[] = [];
+    for (const entry of waveDef.chests) {
+      const count = Math.max(0, Math.floor(entry.count || 0));
+      for (let i = 0; i < count; i++) {
+        queue.push(entry.quality);
       }
     }
-    return qualityOrder[qualityOrder.length - 1];
+    return queue;
   }
 
   private _getChestQualityName(quality: SupplyChestQuality): string {
@@ -3549,6 +3637,9 @@ export class GameManager extends Component {
     previewEnemyType: PreviewEnemyType = 'mixed'
   ): void {
     const permanentBonuses = this._progressManager.getPermanentBonuses();
+    const resolvedStartTier = startTier && startTier > 0
+      ? startTier
+      : permanentBonuses.baseWeaponTier;
     this._runSerial++;
     this.unscheduleAllCallbacks();
     this._state = 'playing';
@@ -3556,7 +3647,11 @@ export class GameManager extends Component {
     this._bullets = [];
     this._explosions = [];
     this._pulses = [];
+    this._trails = [];
+    this._lightnings = [];
+    this._fragments = [];
     this._accumulator = 0;
+    this._battleElapsed = 0;
     this._reviveUsed = false;
     this._baseRunReward = { coins: 0, parts: 0 };
     this._baseRewardGranted = false;
@@ -3578,9 +3673,15 @@ export class GameManager extends Component {
     this._bonusPierceCount = 0;
     this._bonusChainCount = 0;
     this._bonusChainRangeMultiplier = 1;
+    this._activeSupplyRewardSerial = null;
+    this._activeSupplyRewardWave = null;
     this._previewEnemyType = previewEnemyType;
-    this._isPreviewMode = startWave === 0;
+    this._isBaselineCalibrationMode = startWave === 0 && this._isBaselinePreviewEnemyType(previewEnemyType);
+    this._isPreviewMode = startWave === 0 && !this._isBaselineCalibrationMode;
     this._previewMovementLocked = false;
+    this._baselineSpawnTimer = 0;
+    this._baselineAutoSweepDirection = this._getBaselineCalibrationConfig().autoSweep.initialDirection >= 0 ? 1 : -1;
+    this._railContactLoggedTokens.clear();
     this._weaponEvolutionId = forcedEvolution && forcedEvolution !== 'none' ? forcedEvolution : null;
     this._waveSupportTimers.clear();
     this._enemySkillIds = new WeakMap();
@@ -3619,9 +3720,6 @@ export class GameManager extends Component {
     this._completedStageIndex = targetStageIndex;
 
     // 设置开局基础武器档位：默认读取局外成长，调试入口可覆盖
-    const resolvedStartTier = startTier && startTier > 0
-      ? startTier
-      : permanentBonuses.baseWeaponTier;
     this._weaponTierSystem?.setTier(resolvedStartTier);
     if (this._playerCar) {
       this._playerCar.setWeaponTierSystem(this._weaponTierSystem);
@@ -3637,13 +3735,26 @@ export class GameManager extends Component {
     this._playerCar?.reset();
     this._playerCar?.setFireRateMultiplier(1);
     this._playerCar?.setRunFirePatternBonus(0, 0);
+    if (this._isBaselineCalibrationMode && this._playerCar) {
+      const baselineBonus = this._getResolvedBaselineFireBonus();
+      this._playerCar.setRunFirePatternBonus(
+        baselineBonus.bonusMultiShot,
+        baselineBonus.bonusSpreadCount
+      );
+      const { minX, maxX } = this._getBaselineSweepBounds();
+      const startX = this._baselineAutoSweepDirection > 0 ? minX : maxX;
+      this._playerCar.onTouchEnd();
+      this._playerCar.setWorldX(startX);
+    }
 
     // 清空对象池
     this._bulletPool?.putAll();
     this._enemyPool?.putAll();
     this._clearFloatingTexts();
 
-    if (startWave === 0) {
+    if (this._isBaselineCalibrationMode) {
+      this._startBaselineCalibration();
+    } else if (startWave === 0) {
       this._startEvolutionPreview(forcedEvolution, previewEnemyType);
     } else {
       // 开始第一波
@@ -3660,6 +3771,17 @@ export class GameManager extends Component {
     if (this._gameOverScreen) this._gameOverScreen.node.active = false;
     if (this._hud) this._hud.node.active = true;
     this._refreshPauseButtonState();
+    this._telemetry.startRun({
+      runSerial: this._runSerial,
+      stageIndex: this._currentStageIndex,
+      stageLabel: this._getStageDisplayLabel(),
+      battleTime: this._battleElapsed,
+      startTier: resolvedStartTier,
+      forcedEvolution: forcedEvolution || 'none',
+      previewMode: this._isPreviewMode,
+      baselineCalibrationMode: this._isBaselineCalibrationMode,
+      playerHpMax: this._playerCar?.maxHp || GameConfig.car.hp,
+    });
   }
 
   private _startEvolutionPreview(forcedEvolution?: WeaponEvolutionId | 'none', previewEnemyType: PreviewEnemyType = 'mixed'): void {
@@ -3670,15 +3792,103 @@ export class GameManager extends Component {
     this._weaponEvolutionId = previewEvolution;
 
     const previewWave = this._waveManager.getWaveData(8);
-    const formations = previewEnemyType === 'mixed'
-      ? (previewEvolution === 'mg_arc'
+    let formations: Array<{ type: 'normal' | 'shield' | 'runner' | 'suicide' | 'healer' | 'boss_bulldozer' | 'boss_commander'; x: number; y: number }>;
+    if (previewEnemyType === 'mixed' || this._isBaselinePreviewEnemyType(previewEnemyType)) {
+      formations = previewEvolution === 'mg_arc'
         ? this._buildArcPreviewFormation()
-        : this._buildExplodePreviewFormation())
-      : this._buildSingleTypePreviewFormation(previewEnemyType);
+        : this._buildExplodePreviewFormation();
+    } else {
+      formations = this._buildSingleTypePreviewFormation(
+        previewEnemyType as 'normal' | 'shield' | 'runner' | 'suicide' | 'healer' | 'boss_bulldozer' | 'boss_commander'
+      );
+    }
 
     formations.forEach((item) => {
       this._spawnPreviewEnemy(item.type, item.x, item.y, previewWave);
     });
+  }
+
+  private _startBaselineCalibration(): void {
+    if (!this._waveManager || !this._playerCar) return;
+    this._waveManager.waveIndex = 0;
+    this._previewMovementLocked = false;
+    this._playerCar.resetFireTimer();
+    this._updateBaselineAutoSweepControl();
+  }
+
+  private _spawnBaselineCalibrationEnemy(): void {
+    if (!this._enemyPool || !this.enemiesNode || !this._waveManager) return;
+    const cfg = this._getBaselineCalibrationConfig();
+    const activeEnemies = this._waveManager.activeEnemies;
+    if (activeEnemies.length >= Math.max(1, cfg.maxActiveEnemies)) return;
+
+    const enemy = this._enemyPool.get();
+    if (!enemy) return;
+    if (!enemy.node.parent) {
+      this.enemiesNode.addChild(enemy.node);
+    }
+
+    const waveData = this._waveManager.getWaveData(Math.max(0, cfg.waveTemplateIndex));
+    const laneCount = Math.max(1, GameConfig.bridge.laneCount);
+    const laneWidth = (GameConfig.bridge.right - GameConfig.bridge.left) / laneCount;
+    const minLane = Math.max(0, Math.min(laneCount - 1, cfg.autoSweep.minLaneIndex));
+    const maxLane = Math.max(minLane, Math.min(laneCount - 1, cfg.autoSweep.maxLaneIndex));
+    const laneSpan = maxLane - minLane + 1;
+    const spawnIndex = activeEnemies.length % laneSpan;
+    const laneIndex = minLane + spawnIndex;
+    const x = GameConfig.bridge.left + (laneIndex + 0.5) * laneWidth;
+
+    enemy.init(waveData, 1, spawnIndex, 0, laneSpan, 1, x, cfg.enemyType);
+    this._waveManager.enemies.push(enemy);
+    this._telemetry.recordEnemySpawn(1);
+  }
+
+  private _updateBaselineCalibration(dt: number): void {
+    if (!this._isBaselineCalibrationMode || !this._waveManager) return;
+    const cfg = this._getBaselineCalibrationConfig();
+    if (this._battleElapsed <= dt + 1e-6) {
+      const baselineBonus = this._getResolvedBaselineFireBonus();
+      this._telemetry.startWave({
+        wave: 1,
+        battleTime: this._battleElapsed,
+        plannedEnemies: 0,
+        playerHpStart: this._playerCar?.hp || GameConfig.car.hp,
+      });
+      this._telemetry.pushCustomEvent('baseline_calibration_started', {
+        wave: 1,
+        battleTime: this._battleElapsed,
+        enemyType: cfg.enemyType,
+        spawnInterval: cfg.spawnInterval,
+        baselineMode: this._previewEnemyType,
+        bonusSpreadCount: baselineBonus.bonusSpreadCount,
+        bonusMultiShot: baselineBonus.bonusMultiShot,
+        weaponProfile: GameConfig.weaponBase.profileNames[Math.max(0, (this._weaponTierSystem?.tier || 1) - 1)] || '',
+        baseSpreadCount: this._weaponTierSystem?.firePattern.count || 1,
+        baseBurstCount: this._weaponTierSystem?.firePattern.multiShot || 1,
+        finalSpreadCount: (this._weaponTierSystem?.firePattern.count || 1) + baselineBonus.bonusSpreadCount,
+        finalBurstCount: (this._weaponTierSystem?.firePattern.multiShot || 1) + baselineBonus.bonusMultiShot,
+      });
+    }
+    this._baselineSpawnTimer += dt;
+    while (this._baselineSpawnTimer >= cfg.spawnInterval) {
+      this._baselineSpawnTimer -= cfg.spawnInterval;
+      this._spawnBaselineCalibrationEnemy();
+    }
+
+    this._updateBaselineAutoSweepControl();
+    this._updateEnemyRailContactTelemetry(this._waveManager.activeEnemies);
+
+    if (cfg.maxDuration > 0 && this._battleElapsed >= cfg.maxDuration) {
+      this._telemetry.pushCustomEvent('baseline_timeout', {
+        battleTime: this._battleElapsed,
+        maxDuration: cfg.maxDuration,
+      });
+      this._enterGameOver();
+    }
+  }
+
+  private _shouldDisableChestsInCurrentRun(): boolean {
+    return this._isPreviewMode || this._isBaselineCalibrationMode;
   }
 
   private _buildExplodePreviewFormation(): Array<{ type: 'normal' | 'shield' | 'boss_bulldozer'; x: number; y: number }> {
@@ -3769,6 +3979,74 @@ export class GameManager extends Component {
     return GameConfig.bridge.left + enemyStartLaneIndex * laneWidth + 18;
   }
 
+  private _getBaselineCalibrationConfig(): BaselineCalibrationConfigData {
+    return GameConfig.gameplay.baselineCalibration as BaselineCalibrationConfigData;
+  }
+
+  private _isBaselinePreviewEnemyType(type: PreviewEnemyType): boolean {
+    return type === 'baseline_calibration' || type === 'baseline_parallel' || type === 'baseline_serial';
+  }
+
+  private _getResolvedBaselineFireBonus(): { bonusSpreadCount: number; bonusMultiShot: number } {
+    const cfg = this._getBaselineCalibrationConfig();
+    if (this._previewEnemyType === 'baseline_parallel') {
+      return { bonusSpreadCount: 1, bonusMultiShot: 0 };
+    }
+    if (this._previewEnemyType === 'baseline_serial') {
+      return { bonusSpreadCount: 0, bonusMultiShot: 1 };
+    }
+    return {
+      bonusSpreadCount: Math.max(0, Math.floor(cfg.bonusSpreadCount || 0)),
+      bonusMultiShot: Math.max(0, Math.floor(cfg.bonusMultiShot || 0)),
+    };
+  }
+
+  private _isMovementLockSandboxMode(): boolean {
+    return this._isPreviewMode || this._isBaselineCalibrationMode;
+  }
+
+  private _getBaselineSweepBounds(): { minX: number; maxX: number } {
+    const cfg = this._getBaselineCalibrationConfig();
+    const laneCount = Math.max(1, GameConfig.bridge.laneCount);
+    const laneWidth = (GameConfig.bridge.right - GameConfig.bridge.left) / laneCount;
+    const movePadding = Math.max(0, GameConfig.car.movePadding ?? 0);
+    const minLaneIndex = Math.max(0, Math.min(laneCount - 1, cfg.autoSweep.minLaneIndex));
+    const maxLaneIndex = Math.max(minLaneIndex, Math.min(laneCount - 1, cfg.autoSweep.maxLaneIndex));
+    const minX = GameConfig.bridge.left + laneWidth * minLaneIndex + movePadding;
+    const maxX = GameConfig.bridge.left + laneWidth * (maxLaneIndex + 1) - movePadding;
+    return { minX, maxX };
+  }
+
+  private _updateBaselineAutoSweepControl(): void {
+    if (!this._isBaselineCalibrationMode || !this._playerCar) return;
+    const { minX, maxX } = this._getBaselineSweepBounds();
+    const x = this._playerCar.x;
+    if (x <= minX + 1) {
+      this._baselineAutoSweepDirection = 1;
+    } else if (x >= maxX - 1) {
+      this._baselineAutoSweepDirection = -1;
+    }
+    this._playerCar.setKeyLeft(this._baselineAutoSweepDirection < 0);
+    this._playerCar.setKeyRight(this._baselineAutoSweepDirection > 0);
+  }
+
+  private _updateEnemyRailContactTelemetry(enemies: Enemy[]): void {
+    for (const enemy of enemies) {
+      if (!enemy.reachedRail) continue;
+      const token = enemy.spawnToken;
+      if (this._railContactLoggedTokens.has(token)) continue;
+      this._railContactLoggedTokens.add(token);
+      this._telemetry.pushCustomEvent('enemy_reached_rail', {
+        wave: enemy.waveNum,
+        battleTime: this._battleElapsed,
+        enemyType: enemy.enemyType,
+        enemyHp: enemy.hp,
+        enemyHpMax: enemy.maxHp,
+        spawnToken: token,
+      });
+    }
+  }
+
   private _spawnPreviewEnemy(
     type: 'normal' | 'shield' | 'runner' | 'suicide' | 'healer' | 'boss_bulldozer' | 'boss_commander',
     x: number,
@@ -3856,7 +4134,7 @@ export class GameManager extends Component {
   private _refreshPauseButtonState(): void {
     this._cachePauseButtonRefs();
     const visible = this._state === 'playing' || this._state === 'paused';
-    const previewMoveToggle = this._state === 'playing' && this._isPreviewMode;
+    const previewMoveToggle = this._state === 'playing' && this._isMovementLockSandboxMode();
     if (this._pauseButtonNode) {
       this._pauseButtonNode.active = visible;
     }
@@ -3883,16 +4161,19 @@ export class GameManager extends Component {
       this._playerCar?.onTouchEnd();
     } else {
       if (this._state !== 'paused') return;
-    this._state = 'playing';
-    this._accumulator = 0;
-    this._battleElapsed = 0;
+      this._state = 'playing';
+      this._accumulator = 0;
     }
     this._refreshPauseButtonState();
   }
 
   onPauseToggleClicked(): void {
-    if (this._state === 'playing' && this._isPreviewMode) {
+    if (this._state === 'playing' && this._isMovementLockSandboxMode()) {
       this._previewMovementLocked = !this._previewMovementLocked;
+      if (this._isBaselineCalibrationMode && this._playerCar) {
+        this._playerCar.setKeyLeft(false);
+        this._playerCar.setKeyRight(false);
+      }
       this._refreshPauseButtonState();
       return;
     }
@@ -4262,7 +4543,7 @@ export class GameManager extends Component {
   }
 
   setDebugWave(wave: number): void {
-    this._debugWave = Math.max(1, Math.min(99, wave));
+    this._debugWave = Math.max(0, Math.min(99, wave));
   }
 
   setDebugTier(tier: number): void {

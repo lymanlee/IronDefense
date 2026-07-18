@@ -204,10 +204,10 @@ export const GameConfig = {
   // ============================================
   waves: [
     { count: 30,  hp: 20,  speed: 20, atk: 4,  spawnInterval: 1.0 },
-    { count: 44,  hp: 30,  speed: 25, atk: 6,  spawnInterval: 1.0 },
-    { count: 60,  hp: 60,  speed: 25, atk: 8,  spawnInterval: 1.0 },
-    { count: 80,  hp: 90, speed: 30, atk: 11, spawnInterval: 1.0 },
-    { count: 100, hp: 120, speed: 30, atk: 15, spawnInterval: 1.0 },
+    { count: 44,  hp: 26,  speed: 22, atk: 5,  spawnInterval: 1.0 },
+    { count: 60,  hp: 34,  speed: 24, atk: 6,  spawnInterval: 1.0 },
+    { count: 80,  hp: 42, speed: 25, atk: 7, spawnInterval: 1.0 },
+    { count: 100, hp: 52, speed: 26, atk: 9, spawnInterval: 1.0 },
   ],
 
   // 超出基础波次模板后的外推规则（fallback/debug 用）
@@ -226,6 +226,8 @@ export const GameConfig = {
   // 波次编排（前 12 波）
   // 职责：
   // - 直接定义前 12 波的最终敌人构成与出怪节奏
+  // - chests 直接定义该波可投放的宝箱预算（数量与品质）
+  // - 当前 12 波宝箱节奏：2 普通 / 4 普通 / 6 精英 / 8 稀有 / 11 传奇
   // - entries.count 为最终生成数量，不再受 stage 数量倍率放大
   // - mixMode 决定多敌种波次是顺序出怪还是轮转混编
   // ============================================
@@ -233,81 +235,87 @@ export const GameConfig = {
     {
       kind: 'normal',
       title: '桥头试探',
-      spawnInterval: 0.58,
+      spawnInterval: 0.52,
       entries: [
-        { type: 'shield', count: 40 },
-        { type: 'normal', count: 300 },
+        { type: 'shield', count: 18 },
+        { type: 'normal', count: 184 },
       ],
     },
     {
       kind: 'mixed',
       title: '快速接敌',
-      spawnInterval: 0.42,
+      spawnInterval: 0.50,
+      chests: [
+        { quality: 'normal', count: 1 },
+      ],
       entries: [
-        { type: 'normal', count: 42 },
-        { type: 'runner', count: 10 },
+        { type: 'normal', count: 118 },
+        { type: 'runner', count: 14 },
       ],
     },
     {
       kind: 'mixed',
       title: '护栏试压',
-      spawnInterval: 0.4,
+      spawnInterval: 0.46,
+      chests: [
+        { quality: 'normal', count: 1 },
+      ],      
       entries: [
-        { type: 'normal', count: 46 },
-        { type: 'runner', count: 12 },
-        { type: 'shield', count: 8 },
-      ],
-    },
-    {
-      kind: 'pressure',
-      title: '装甲前压',
-      spawnInterval: 0.38,
-      entries: [
-        { type: 'normal', count: 54 },
-        { type: 'runner', count: 16 },
+        { type: 'normal', count: 122 },
+        { type: 'runner', count: 15 },
         { type: 'shield', count: 12 },
       ],
     },
     {
       kind: 'pressure',
-      title: '爆破试探',
-      spawnInterval: 0.38,
+      title: '装甲前压',
+      spawnInterval: 0.44,
+      chests: [
+        { quality: 'normal', count: 1 },
+      ],
       entries: [
-        { type: 'normal', count: 58 },
-        { type: 'runner', count: 18 },
-        { type: 'shield', count: 14 },
-        { type: 'suicide', count: 6 },
+        { type: 'normal', count: 124 },
+        { type: 'runner', count: 16 },
+        { type: 'shield', count: 13 },
+      ],
+    },
+    {
+      kind: 'pressure',
+      title: '爆破试探',
+      spawnInterval: 0.42,
+      chests: [
+        { quality: 'elite', count: 1 },
+      ],      
+      entries: [
+        { type: 'normal', count: 134 },
+        { type: 'runner', count: 19 },
+        { type: 'shield', count: 15 },
+        { type: 'suicide', count: 10 },
       ],
     },
     {
       kind: 'crisis',
       title: '连环突击',
-      spawnInterval: 0.36,
+      spawnInterval: 0.40,
+      chests: [
+        { quality: 'elite', count: 1 },
+      ],
       entries: [
-        { type: 'normal', count: 64 },
-        { type: 'runner', count: 20 },
+        { type: 'normal', count: 142 },
+        { type: 'runner', count: 112 },
         { type: 'shield', count: 16 },
-        { type: 'suicide', count: 8 },
+        { type: 'suicide', count: 12 },
       ],
     },
     {
       kind: 'support',
       title: '后排医护',
       spawnInterval: 0.36,
+      chests: [
+        { quality: 'elite', count: 1 },
+      ],      
       entries: [
-        { type: 'normal', count: 70 },
-        { type: 'runner', count: 20 },
-        { type: 'shield', count: 18 },
-        { type: 'suicide', count: 8 },
-        { type: 'healer', count: 4 },
-      ],
-    },
-    {
-      kind: 'crisis',
-      title: '交错冲锋',
-      spawnInterval: 0.34,
-      entries: [
-        { type: 'normal', count: 76 },
+        { type: 'normal', count: 84 },
         { type: 'runner', count: 24 },
         { type: 'shield', count: 22 },
         { type: 'suicide', count: 10 },
@@ -316,38 +324,62 @@ export const GameConfig = {
     },
     {
       kind: 'crisis',
-      title: '极限突破',
-      spawnInterval: 0.33,
+      title: '交错冲锋',
+      spawnInterval: 0.34,
+      chests: [
+        { quality: 'rare', count: 1 },
+      ],
       entries: [
-        { type: 'normal', count: 84 },
-        { type: 'runner', count: 28 },
-        { type: 'shield', count: 26 },
+        { type: 'normal', count: 92 },
+        { type: 'runner', count: 30 },
+        { type: 'shield', count: 27 },
         { type: 'suicide', count: 12 },
         { type: 'healer', count: 6 },
       ],
     },
     {
       kind: 'crisis',
-      title: '高压推进',
-      spawnInterval: 0.32,
+      title: '极限突破',
+      spawnInterval: 0.33,
+      chests: [
+        { quality: 'rare', count: 1 },
+      ],
       entries: [
-        { type: 'normal', count: 92 },
-        { type: 'runner', count: 32 },
-        { type: 'shield', count: 30 },
+        { type: 'normal', count: 102 },
+        { type: 'runner', count: 34 },
+        { type: 'shield', count: 31 },
         { type: 'suicide', count: 14 },
         { type: 'healer', count: 7 },
       ],
     },
     {
       kind: 'crisis',
-      title: '火力封锁',
-      spawnInterval: 0.31,
+      title: '高压推进',
+      spawnInterval: 0.32,
+      chests: [
+        { quality: 'rare', count: 1 },
+      ],
       entries: [
-        { type: 'normal', count: 100 },
-        { type: 'runner', count: 36 },
-        { type: 'shield', count: 34 },
+        { type: 'normal', count: 112 },
+        { type: 'runner', count: 39 },
+        { type: 'shield', count: 36 },
         { type: 'suicide', count: 16 },
         { type: 'healer', count: 8 },
+      ],
+    },
+    {
+      kind: 'crisis',
+      title: '火力封锁',
+      spawnInterval: 0.31,
+      chests: [
+        { quality: 'legendary', count: 1 },
+      ],
+      entries: [
+        { type: 'normal', count: 122 },
+        { type: 'runner', count: 44 },
+        { type: 'shield', count: 41 },
+        { type: 'suicide', count: 19 },
+        { type: 'healer', count: 9 },
       ],
     },
     {
@@ -355,13 +387,16 @@ export const GameConfig = {
       title: '指挥官战车',
       spawnInterval: 0.34,
       pauseTime: 5.0,
+      chests: [
+        { quality: 'legendary', count: 1 },
+      ],      
       entries: [
         { type: 'boss_commander', count: 1 },
-        { type: 'normal', count: 48 },
-        { type: 'runner', count: 18 },
-        { type: 'shield', count: 18 },
-        { type: 'suicide', count: 8 },
-        { type: 'healer', count: 4 },
+        { type: 'normal', count: 62 },
+        { type: 'runner', count: 24 },
+        { type: 'shield', count: 24 },
+        { type: 'suicide', count: 10 },
+        { type: 'healer', count: 5 },
       ],
     },
   ],
@@ -381,10 +416,10 @@ export const GameConfig = {
       startWave: 1,
       waveCount: 12,
       rewardBonus: { coins: 120, parts: 3 },
-      enemyHpScaleByWave: [1.0, 1.02, 1.06, 1.12, 1.18, 1.26, 1.34, 1.44, 1.56, 1.7, 1.86, 2.05],
-      enemyAtkScaleByWave: [1.0, 1.0, 1.03, 1.08, 1.12, 1.17, 1.22, 1.28, 1.35, 1.43, 1.52, 1.62],
+      enemyHpScaleByWave: [1.0, 1.04, 1.1, 1.18, 1.28, 1.4, 1.55, 1.72, 1.92, 2.15, 2.42, 2.75],
+      enemyAtkScaleByWave: [1.0, 1.0, 1.02, 1.05, 1.09, 1.14, 1.2, 1.27, 1.35, 1.44, 1.54, 1.65],
       enemySpeedScaleByWave: [1.0, 1.0, 1.01, 1.02, 1.03, 1.04, 1.05, 1.06, 1.07, 1.08, 1.09, 1.1],
-      chestHpMultiplierByWave: [1, 10, 10, 16, 18, 21, 24, 27, 31, 36, 42, 48],
+      chestHpMultiplierByWave: [1, 1, 1.3, 1.7, 2.2, 2.8, 3.5, 4.3, 5.2, 6.3, 7.5, 9.0],
     },
   ],
 
@@ -434,10 +469,67 @@ export const GameConfig = {
   },
 
   // ============================================
+  // 微信分享图片配置
+  // 优先使用 approvedImages（审核通过的图片，推荐）：
+  //   在 MP 后台「游戏能力地图 - 运营素材管理 - 分享图片」上传并通过审核后，
+  //   会同时下发「图片编号(imageUrlId)」与「图片地址(imageUrl)」，二者必须成对填写、缺一不可。
+  //   使用审核图无需配置 downloadFile 合法域名，且是朋友圈分享(imageUrl 在朋友圈已不再生效)的可靠方式。
+  //   填多张时，每次分享随机选取其中一张，由 ShareManager 处理。
+  // images：普通链接（可选兜底通道，仅在没有 approvedImages 时才回退使用）。
+  //   推荐填打包进小游戏包内的本地相对路径（如 'share/share-1.png'），免域名、免审核、即时可用；
+  //   若填网络链接则需配 downloadFile 合法域名，且朋友圈场景不生效。
+  //   优先级：approvedImages（审核图，朋友圈可靠）> images（本地图/网络图）> 微信默认截图。
+  // 运行时可用 ShareManager.instance.setApprovedImages([...]) / setImages([...]) 覆盖。
+  // ============================================
+  share: {
+    approvedImages: [
+      // { imageUrlId: '填入MP后台下发的图片编号', imageUrl: '填入MP后台下发的图片地址' },
+      { imageUrlId: 'pvph1nCHSSW0yXZKLEa/Eg==', imageUrl: 'https://mmocgame.qpic.cn/wechatgame/NJ5GzzrY8SZibPv43ic5eTOiabOEiaGOBx7ONG4uocgyfibXsNLq4iaNG1MEFgk7M7d7yt/0' }
+    ],
+    images: [
+      // 'https://your-cdn.com/share/bridge-1.png',
+      // 'share/share-1.png',
+    ],
+  },
+
+  // ============================================
   // 可玩性升级配置：补给、复活、结算、素材占位
   // assetBrief 用于后续素材制作排期，当前用文字占位
   // ============================================
   gameplay: {
+    // 基线校准场景
+    // 职责：
+    // - 为“真实运行时实验”与“数值模拟器”提供统一入口
+    // - 不参与正常关卡流程，仅服务调试/校准
+    // 口径说明：
+    // - baseline_calibration 对应“匀速自动扫射实验基线”
+    // - baseline_parallel / baseline_serial 用于拆分观察并发与串行火力收益
+    // - tools/balance 下的模拟器当前更接近“玩家代理模型”，允许比匀速实验值略乐观
+    // - 如果需要严格复现实验值，应优先参考真实 trace，而不是只看模拟器输出
+    baselineCalibration: {
+      // 敌军生成间隔；基线场景下按固定节奏无限出怪
+      spawnInterval: 0.2,
+      // 基线场景默认敌军类型
+      enemyType: 'shield',
+      // 使用哪一档 waves 作为敌军基础属性底稿；0=第1波，1=第2波
+      waveTemplateIndex: 0,
+      // 敌军最多允许活动的同屏数量；避免离屏堆积导致校准失真
+      maxActiveEnemies: 200,
+      // 单次校准最长持续时间；0 表示不限时，仅在需要调试保护时启用
+      maxDuration: 0,
+      // 额外并发数；用于单独校准“并发火力”时打开
+      bonusSpreadCount: 0,
+      // 额外连发数；用于单独校准“串行火力”时打开
+      bonusMultiShot: 0,
+      // 自动左右扫射规则
+      autoSweep: {
+        // 仅在敌军区域内往返，不进入宝箱轨道
+        minLaneIndex: 1,
+        maxLaneIndex: 4,
+        // 初始方向：1=向右，-1=向左
+        initialDirection: 1,
+      },
+    },
     revive: {
       hpRatio: 0.4,
       invulnerableSeconds: 3,
@@ -456,12 +548,12 @@ export const GameConfig = {
       chest: {
         // 第几波开始允许出现宝箱（关内波次，从 1 开始）
         minWave: 2,
-        // 单局最多能通过击毁宝箱获得几次补给选择
-        maxSelectionsPerRun: 6,
-        // 常规生成间隔基线，单位秒
-        baseSpawnDelay: 5.2,
-        // 常规生成间隔浮动范围，0 表示固定节奏
-        delayVariance: 0,
+        // 单局最多能通过击毁宝箱获得几次补给选择；手写波次的总宝箱预算不要超过该值
+        maxSelectionsPerRun: 12,
+        // 举例：若一波在 t=0 开始，配置 4.2，则该波第一个宝箱最早在 t=4.2 入场
+        plannedWaveStartDelay: 4.2,
+        // 举例：若同一波有第 2 个宝箱，且这里配置 7.2，则它会在前一个计划宝箱入场约 7.2 秒后再入场
+        plannedSpawnGap: 7.2,
         // 宝箱碰撞半径，同时影响宝箱轨道间距的最小安全值
         radius: 42,
         // 宝箱沿轨道下移的实际速度，单位 px/s
@@ -476,28 +568,17 @@ export const GameConfig = {
         slotGap: 100,
         // 宝箱在战场中停靠位置的纵向比例；越大越靠近护栏
         stopRatio: 0.82,
-        // 击毁一个宝箱后，下一次允许补位的最短延迟
-        refillDelay: 1.1,
         // 宝箱血量 = 当前波敌人基础 HP * baseHpFactor * 关卡波次倍率 * 品质倍率 * serial 递增倍率
-        baseHpFactor: 9.5,
+        baseHpFactor: 4.8,
         // 不同品质宝箱的额外厚度倍率；只负责品质差异，不负责整关节奏
         qualityHpMultiplier: {
           normal: 1.0,
-          elite: 1.16,
-          rare: 1.34,
-          legendary: 1.58,
+          elite: 1.18,
+          rare: 1.38,
+          legendary: 1.62,
         },
         // 同一局内第 N 个宝箱的额外血量成长系数，按指数叠加
-        serialGrowth: 0.2,
-        // 宝箱品质分布规则：
-        // - serialMax 表示适用到第几个宝箱（含）
-        // - weights 为该区间内四种品质的抽取权重
-        qualityRules: [
-          { serialMax: 0, weights: { normal: 1, elite: 0, rare: 0, legendary: 0 } },
-          { serialMax: 1, weights: { normal: 0.73, elite: 0.27, rare: 0, legendary: 0 } },
-          { serialMax: 4, weights: { normal: 0.28, elite: 0.5, rare: 0.18, legendary: 0.04 } },
-          { serialMax: 999, weights: { normal: 0.14, elite: 0.48, rare: 0.26, legendary: 0.12 } },
-        ],
+        serialGrowth: 0.08,
       },
       // 宝箱品质与补给卡星级的映射规则：
       // - maxStar: 该品质宝箱最多能出现几星卡
@@ -754,7 +835,7 @@ export const GameConfig = {
       unlockLevel: 1,
       // 单局第几个宝箱开始允许投放分支入口卡
       // 取值从 0 开始：0=第1个宝箱，1=第2个宝箱，2=第3个宝箱
-      minChestSerialToOffer: 2,
+      minChestSerialToOffer: 3,
       // 分支本体定义：描述拿到该分支后，子弹行为如何变化
       defs: {
         mg_explode: {
@@ -995,10 +1076,18 @@ export interface WaveSpawnEntryData {
   count: number;
 }
 
+export type SupplyChestQuality = 'normal' | 'elite' | 'rare' | 'legendary';
+
+export interface WaveChestSpawnEntryData {
+  quality: SupplyChestQuality;
+  count: number;
+}
+
 export interface WaveDefinitionData {
   kind: WaveKind;
   title: string;
   entries: WaveSpawnEntryData[]; // 本波最终敌人构成
+  chests?: WaveChestSpawnEntryData[]; // 本波计划投放的宝箱品质与数量；主玩法建议显式填写
   mixMode?: 'sequential' | 'round_robin'; // 多敌种生成顺序
   spawnInterval?: number; // 本波最终出怪间隔
   pauseTime?: number; // 本波结束后的停顿时间
@@ -1058,18 +1147,11 @@ export type SupplyCardStar = 1 | 2 | 3 | 4 | 5;
 
 export type SupplyTriggerMode = 'passive' | 'instant';
 
-export type SupplyChestQuality = 'normal' | 'elite' | 'rare' | 'legendary';
-
 export interface SupplyChestQualityWeights {
   normal: number;
   elite: number;
   rare: number;
   legendary: number;
-}
-
-export interface SupplyChestQualityRuleData {
-  serialMax: number;
-  weights: SupplyChestQualityWeights;
 }
 
 export interface SupplyStarRuleData {
@@ -1079,9 +1161,9 @@ export interface SupplyStarRuleData {
 
 export interface SupplyChestConfigData {
   minWave: number; // 第几波开始允许掉落宝箱
-  maxSelectionsPerRun: number; // 单局最多可开启多少次补给
-  baseSpawnDelay: number; // 常规出箱间隔基线
-  delayVariance: number; // 出箱间隔波动范围
+  maxSelectionsPerRun: number; // 单局最多可开启多少次补给；手写 waveDefs.chests 时应保证总预算不超过此值
+  plannedWaveStartDelay?: number; // 一波开始后，等待多少秒再放出这波的第 1 个计划宝箱
+  plannedSpawnGap?: number; // 同一波如果配置了多个宝箱，后续宝箱彼此之间相隔多少秒再入场
   radius: number; // 宝箱碰撞半径
   moveSpeed: number; // 宝箱沿轨道下移速度
   laneIndex?: number; // 宝箱轨道所在列
@@ -1089,11 +1171,9 @@ export interface SupplyChestConfigData {
   capacity?: number; // 轨道同时容纳的宝箱数量
   slotGap?: number; // 同轨道宝箱间距
   stopRatio?: number; // 宝箱停靠区域的纵向比例
-  refillDelay?: number; // 击毁后下一箱允许补位的延迟
   baseHpFactor?: number; // 宝箱 HP 相对当前波敌人基础 HP 的换算系数
   qualityHpMultiplier?: SupplyChestQualityWeights; // 不同品质宝箱的额外血量倍率
   serialGrowth?: number; // 同局第 N 个宝箱的指数成长系数
-  qualityRules?: SupplyChestQualityRuleData[]; // 宝箱品质抽取规则
 }
 
 export interface SupplyConfigData {
@@ -1102,6 +1182,21 @@ export interface SupplyConfigData {
   chest: SupplyChestConfigData; // 宝箱生成/轨道/血量规则
   starRules: Record<SupplyChestQuality, SupplyStarRuleData>; // 宝箱品质到补给卡星级的映射规则
   options: SupplyOptionData[]; // 常规补给卡池
+}
+
+export interface BaselineCalibrationConfigData {
+  spawnInterval: number; // 基线场景固定出怪间隔
+  enemyType: EnemyTypeId; // 基线场景默认敌军类型
+  waveTemplateIndex: number; // 复用第几档 waves 底稿，0 开始
+  maxActiveEnemies: number; // 同屏最大活动敌人数量
+  maxDuration: number; // 单次校准最大持续秒数
+  bonusSpreadCount?: number; // 额外并发数（在基础档位 firePattern.count 上追加）
+  bonusMultiShot?: number; // 额外连发数（在基础档位 firePattern.multiShot 上追加）
+  autoSweep: {
+    minLaneIndex: number; // 自动扫射左边界所在列，0 开始
+    maxLaneIndex: number; // 自动扫射右边界所在列，0 开始
+    initialDirection: 1 | -1; // 初始方向
+  };
 }
 
 export interface StageRewardBonusData {

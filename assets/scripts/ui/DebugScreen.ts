@@ -8,7 +8,7 @@ import { EnemyTypeId, GameConfig, WaveDefinitionData, WeaponEvolutionId } from '
 
 const { ccclass, property } = _decorator;
 
-type PreviewEnemyType = EnemyTypeId | 'mixed';
+type PreviewEnemyType = EnemyTypeId | 'mixed' | 'baseline_calibration' | 'baseline_parallel' | 'baseline_serial';
 
 @ccclass('DebugScreen')
 export class DebugScreen extends Component {
@@ -140,7 +140,7 @@ export class DebugScreen extends Component {
 
   private _updateDisplay(): void {
     if (this.waveValueLabel) {
-      this.waveValueLabel.string = this._wave === 0 ? '预览' : `${this._wave}`;
+      this.waveValueLabel.string = `${this._wave}`;
     }
 
     if (this.levelValueLabel) {
@@ -158,7 +158,9 @@ export class DebugScreen extends Component {
     // 更新波次预览
     if (this.previewLabel) {
       if (this._wave === 0) {
-        this.previewLabel.string = `特效预览模式\n敌军: ${this._getEnemyTypeLabel()}  分支: ${this._getEvolutionLabel()}\n用于稳定观察命中 proc 动画`;
+        this.previewLabel.string = this._isBaselineMode(this._enemyType)
+          ? this._getBaselineModeDescription(this._enemyType)
+          : `特效预览模式\n敌军: ${this._getEnemyTypeLabel()}  分支: ${this._getEvolutionLabel()}\n用于稳定观察命中 proc 动画`;
       } else {
         const summary = this._getWavePreviewSummary(this._wave);
         this.previewLabel.string = summary;
@@ -180,7 +182,7 @@ export class DebugScreen extends Component {
   }
 
   private _cycleEnemyType(direction: 1 | -1): void {
-    const all: PreviewEnemyType[] = ['mixed', 'normal', 'shield', 'runner', 'healer', 'boss_bulldozer', 'boss_commander'];
+    const all: PreviewEnemyType[] = ['mixed', 'baseline_calibration', 'baseline_parallel', 'baseline_serial', 'normal', 'shield', 'runner', 'healer', 'boss_bulldozer', 'boss_commander'];
     const index = all.indexOf(this._enemyType);
     this._enemyType = all[(index + direction + all.length) % all.length];
   }
@@ -212,9 +214,31 @@ export class DebugScreen extends Component {
         return '推土机Boss';
       case 'boss_commander':
         return '指挥官Boss';
+      case 'baseline_calibration':
+        return '基线校准';
+      case 'baseline_parallel':
+        return '基线并发';
+      case 'baseline_serial':
+        return '基线串行';
       case 'mixed':
       default:
         return '混合';
+    }
+  }
+
+  private _isBaselineMode(type: PreviewEnemyType): boolean {
+    return type === 'baseline_calibration' || type === 'baseline_parallel' || type === 'baseline_serial';
+  }
+
+  private _getBaselineModeDescription(type: PreviewEnemyType): string {
+    switch (type) {
+      case 'baseline_parallel':
+        return '基线并发模式\n无限护盾敌军，0.2s 固定出怪，战车自动左右扫射\n在基础单发档位上额外增加 1 并发，用于校准并发火力';
+      case 'baseline_serial':
+        return '基线串行模式\n无限护盾敌军，0.2s 固定出怪，战车自动左右扫射\n在基础单发档位上额外增加 1 连发，用于校准串行火力';
+      case 'baseline_calibration':
+      default:
+        return '基线校准模式\n无限护盾敌军，0.2s 固定出怪，战车自动左右扫射\n用于对比真实运行时与模拟器的基础火力表现';
     }
   }
 

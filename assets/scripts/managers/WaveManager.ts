@@ -27,6 +27,7 @@ export class WaveManager {
   private _announceTime: number = 0;
   private _justStarted: boolean = false;
   private _enemyFactory: (() => Enemy) | null = null;
+  private _enemySpawnListener: ((waveNum: number) => void) | null = null;
 
   // 队列生成参数
   private _totalSlots: number = 0;        // 总槽位数（第一行的对称布局）
@@ -45,6 +46,10 @@ export class WaveManager {
    */
   setEnemyFactory(factory: () => Enemy): void {
     this._enemyFactory = factory;
+  }
+
+  setEnemySpawnListener(listener: ((waveNum: number) => void) | null): void {
+    this._enemySpawnListener = listener;
   }
 
   setWaveStatScaleProvider(provider: (waveIndex: number) => { hp: number; atk: number; speed: number }): void {
@@ -81,6 +86,10 @@ export class WaveManager {
 
   get currentWaveDef(): WaveDefinitionData | null {
     return this._activeWaveDef;
+  }
+
+  get currentPlannedEnemyCount(): number {
+    return this._spawnPlan.reduce((sum, entry) => sum + entry.count, 0);
   }
 
   private _getScaledWaveData(waveData: WaveData, waveIndex: number): WaveData {
@@ -295,6 +304,7 @@ export class WaveManager {
       const enemyType = this._consumeNextEnemyType();
       enemy.init(this._getScaledWaveData(waveData, this._waveIndex), this.currentWaveNum, slotIndex, rowIndex, totalSlots, totalRows, x, enemyType);
       this._enemies.push(enemy);
+      this._enemySpawnListener?.(this.currentWaveNum);
       this._spawnCount++;
       this._spawnSlotCursor++;
     }
