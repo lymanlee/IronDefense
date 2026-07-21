@@ -1,4 +1,4 @@
-import { _decorator, assetManager, AssetManager, Color, Component, director, Graphics, Label, Node, UITransform } from 'cc';
+import { _decorator, assetManager, AssetManager, Color, Component, director, Graphics, Label, Node, resources, Sprite, SpriteFrame, UITransform } from 'cc';
 const { ccclass } = _decorator;
 
 type RemoteBundleName = 'game' | 'battle' | 'audio';
@@ -6,6 +6,11 @@ type RemoteBundleName = 'game' | 'battle' | 'audio';
 @ccclass('LoadingManager')
 export class LoadingManager extends Component {
   private static readonly REMOTE_BUNDLES: RemoteBundleName[] = ['game', 'battle', 'audio'];
+  private static readonly ROOT_WIDTH = 720;
+  private static readonly ROOT_HEIGHT = 1280;
+  private static readonly PROGRESS_BAR_WIDTH = 480;
+  private static readonly PROGRESS_BAR_HEIGHT = 18;
+  private static readonly LOCAL_BG_PATH = 'loading/remote-loading-bg/spriteFrame';
 
   private _gameBundle: AssetManager.Bundle | null = null;
   private _progressLabel: Label | null = null;
@@ -25,13 +30,34 @@ export class LoadingManager extends Component {
     const root = new Node('LoadingRoot');
     canvas.addChild(root);
     const rootTransform = root.addComponent(UITransform);
-    rootTransform.setContentSize(720, 1280);
+    rootTransform.setContentSize(LoadingManager.ROOT_WIDTH, LoadingManager.ROOT_HEIGHT);
 
     const bg = root.addComponent(Graphics);
     bg.clear();
     bg.fillColor = new Color(5, 14, 18, 255);
-    bg.rect(-360, -640, 720, 1280);
+    bg.rect(
+      -LoadingManager.ROOT_WIDTH / 2,
+      -LoadingManager.ROOT_HEIGHT / 2,
+      LoadingManager.ROOT_WIDTH,
+      LoadingManager.ROOT_HEIGHT
+    );
     bg.fill();
+
+    this._loadLocalBackground(root);
+
+    const overlayNode = new Node('BackgroundOverlay');
+    root.addChild(overlayNode);
+    const overlayTransform = overlayNode.addComponent(UITransform);
+    overlayTransform.setContentSize(LoadingManager.ROOT_WIDTH, LoadingManager.ROOT_HEIGHT);
+    const overlay = overlayNode.addComponent(Graphics);
+    overlay.fillColor = new Color(4, 12, 16, 128);
+    overlay.rect(
+      -LoadingManager.ROOT_WIDTH / 2,
+      -LoadingManager.ROOT_HEIGHT / 2,
+      LoadingManager.ROOT_WIDTH,
+      LoadingManager.ROOT_HEIGHT
+    );
+    overlay.fill();
 
     const titleNode = new Node('TitleLabel');
     root.addChild(titleNode);
@@ -64,17 +90,23 @@ export class LoadingManager extends Component {
     root.addChild(barBgNode);
     barBgNode.setPosition(0, -30, 0);
     const barBgTransform = barBgNode.addComponent(UITransform);
-    barBgTransform.setContentSize(480, 18);
+    barBgTransform.setContentSize(LoadingManager.PROGRESS_BAR_WIDTH, LoadingManager.PROGRESS_BAR_HEIGHT);
     const barBg = barBgNode.addComponent(Graphics);
     barBg.fillColor = new Color(27, 43, 47, 255);
-    barBg.roundRect(-240, -9, 480, 18, 9);
+    barBg.roundRect(
+      -LoadingManager.PROGRESS_BAR_WIDTH / 2,
+      -LoadingManager.PROGRESS_BAR_HEIGHT / 2,
+      LoadingManager.PROGRESS_BAR_WIDTH,
+      LoadingManager.PROGRESS_BAR_HEIGHT,
+      LoadingManager.PROGRESS_BAR_HEIGHT / 2
+    );
     barBg.fill();
 
     const barFillNode = new Node('ProgressBarFill');
     root.addChild(barFillNode);
     barFillNode.setPosition(0, -30, 0);
     const barFillTransform = barFillNode.addComponent(UITransform);
-    barFillTransform.setContentSize(480, 18);
+    barFillTransform.setContentSize(LoadingManager.PROGRESS_BAR_WIDTH, LoadingManager.PROGRESS_BAR_HEIGHT);
     this._progressGraphics = barFillNode.addComponent(Graphics);
 
     const progressNode = new Node('ProgressLabel');
@@ -102,6 +134,23 @@ export class LoadingManager extends Component {
     this._statusLabel.verticalAlign = Label.VerticalAlign.CENTER;
   }
 
+  private _loadLocalBackground(root: Node): void {
+    const bgNode = new Node('BackgroundImage');
+    root.addChild(bgNode);
+    const bgTransform = bgNode.addComponent(UITransform);
+    bgTransform.setContentSize(LoadingManager.ROOT_WIDTH, LoadingManager.ROOT_HEIGHT);
+    const bgSprite = bgNode.addComponent(Sprite);
+    bgSprite.sizeMode = Sprite.SizeMode.CUSTOM;
+
+    resources.load(LoadingManager.LOCAL_BG_PATH, SpriteFrame, (err, spriteFrame) => {
+      if (err || !spriteFrame) {
+        console.warn('[LoadingManager] load local loading background failed:', err);
+        return;
+      }
+      bgSprite.spriteFrame = spriteFrame;
+    });
+  }
+
   private _setProgress(progress: number, status: string): void {
     const clamped = Math.max(0, Math.min(1, progress));
     if (this._progressLabel) {
@@ -111,10 +160,16 @@ export class LoadingManager extends Component {
       this._statusLabel.string = status;
     }
     if (this._progressGraphics) {
-      const width = 480 * clamped;
+      const width = LoadingManager.PROGRESS_BAR_WIDTH * clamped;
       this._progressGraphics.clear();
       this._progressGraphics.fillColor = new Color(220, 153, 59, 255);
-      this._progressGraphics.roundRect(-240, -9, width, 18, 9);
+      this._progressGraphics.roundRect(
+        -LoadingManager.PROGRESS_BAR_WIDTH / 2,
+        -LoadingManager.PROGRESS_BAR_HEIGHT / 2,
+        width,
+        LoadingManager.PROGRESS_BAR_HEIGHT,
+        LoadingManager.PROGRESS_BAR_HEIGHT / 2
+      );
       this._progressGraphics.fill();
     }
   }

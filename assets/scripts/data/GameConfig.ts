@@ -416,7 +416,7 @@ export const GameConfig = {
       startWave: 1,
       waveCount: 12,
       rewardBonus: { coins: 120, parts: 3 },
-      enemyHpScaleByWave: [1.0, 1.04, 1.1, 1.18, 1.28, 1.4, 1.55, 1.72, 1.92, 2.15, 2.42, 2.75],
+      enemyHpScaleByWave: [0.8, 1.04, 1.1, 1.18, 1.28, 1.4, 1.55, 1.72, 1.92, 2.15, 2.42, 2.75],
       enemyAtkScaleByWave: [1.0, 1.0, 1.02, 1.05, 1.09, 1.14, 1.2, 1.27, 1.35, 1.44, 1.54, 1.65],
       enemySpeedScaleByWave: [1.0, 1.0, 1.01, 1.02, 1.03, 1.04, 1.05, 1.06, 1.07, 1.08, 1.09, 1.1],
       chestHpMultiplierByWave: [1, 1, 1.3, 1.7, 2.2, 2.8, 3.5, 4.3, 5.2, 6.3, 7.5, 9.0],
@@ -484,7 +484,11 @@ export const GameConfig = {
   share: {
     approvedImages: [
       // { imageUrlId: '填入MP后台下发的图片编号', imageUrl: '填入MP后台下发的图片地址' },
-      { imageUrlId: 'pvph1nCHSSW0yXZKLEa/Eg==', imageUrl: 'https://mmocgame.qpic.cn/wechatgame/NJ5GzzrY8SZibPv43ic5eTOiabOEiaGOBx7ONG4uocgyfibXsNLq4iaNG1MEFgk7M7d7yt/0' }
+      { imageUrlId: 'pvph1nCHSSW0yXZKLEa/Eg==', imageUrl: 'https://mmocgame.qpic.cn/wechatgame/NJ5GzzrY8SZibPv43ic5eTOiabOEiaGOBx7ONG4uocgyfibXsNLq4iaNG1MEFgk7M7d7yt/0' },
+      { imageUrlId: 'u6Lik0olSEWz18hmM8LCpQ==', imageUrl: 'https://mmocgame.qpic.cn/wechatgame/kxUFhkfhKgBJ1HMsQ4p9IdOGBo4qvlUV1aiaEWAo5t3zgHyMu2aHWSBUzGhIiap5dic/0' },
+      { imageUrlId: '54bUEnDkTH62RBsNoss9QA==', imageUrl: 'https://mmocgame.qpic.cn/wechatgame/UibBOFyuTUdCQaF5Acxiadia8ibdfRFS0nlB7FazrP4ZibYBP2VoZ3YmqhbialgctWjME5/0' },
+      { imageUrlId: 'Bh7W0aMvReOpEhDN/n0EfQ==', imageUrl: 'https://mmocgame.qpic.cn/wechatgame/Az1eUItypUTia14ypicz64HY6PPhXK9OB9icdEqCOialSxjpiafiafRiaFCiaHZqSSJFJLml/0' },
+      { imageUrlId: 'MsWoEo4URFi4LfcE1CeYKg==', imageUrl: 'https://mmocgame.qpic.cn/wechatgame/icGfvypAtdqzTibnbGV8h0cs8ibEQDfqs8bWrtQq5grB6JrlGSEckId6QHKI9pNexlC/0' }
     ],
     images: [
       // 'https://your-cdn.com/share/bridge-1.png',

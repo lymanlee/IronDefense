@@ -68,5 +68,15 @@
         }
       }
     }
+  },
+  "splash-setting": {
+    "background": {
+      "image": "project://settings/remote-loading-bg.jpg",
+      "type": "color"
+    },
+    "logo": {
+      "type": "default"
+    },
+    "totalTime": 500
   }
 }
